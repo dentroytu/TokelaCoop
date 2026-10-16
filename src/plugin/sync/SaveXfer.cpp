@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
+#include <algorithm>
 
 namespace coop {
 namespace savexfer {
@@ -141,6 +142,118 @@ void removeTree(const std::string& folder, int depth) {
         FindClose(h);
     }
     RemoveDirectoryA(folder.c_str());
+}
+
+// The save a received folder replaced: kept, not deleted. A friend whose own
+// save had the same name as the host's lost it with no warning. Moved (same
+// volume: instant) to <saves>\..\TokelaCoop_backups\"<yyyyMMdd-HHmmss> <name>",
+// outside the save folder so Kenshi's load menu does not list it; only the newest
+// SAVE_BACKUPS_KEPT are kept (saves are 30+ MB). A folder that is only an earlier
+// RECEIVED copy, untouched since (the host streams every save it makes), is not
+// worth a backup - keeping those would push the friend's own save out of the
+// three - so it is removed as before (see noteReceived).
+const unsigned int SAVE_BACKUPS_KEPT = 3;
+
+// <saves>\..\TokelaCoop_backups for a folder inside the save folder; "" when the
+// path has no parent to put it in (the backups would land among the saves).
+std::string backupsRootFor(const std::string& saveDir) {
+    std::string::size_type cut = saveDir.find_last_of("\\/");
+    if (cut == std::string::npos) return std::string();
+    std::string saves = saveDir.substr(0, cut);                  // ...\save
+    cut = saves.find_last_of("\\/");
+    if (cut == std::string::npos) return std::string();
+    return pathJoin(saves.substr(0, cut), "TokelaCoop_backups");
+}
+
+// Newest last-write time of any file in a folder tree (0 if none).
+unsigned __int64 newestWrite(const std::string& folder, int depth) {
+    unsigned __int64 best = 0;
+    if (depth > 6) return best;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pathJoin(folder, "*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return best;
+    do {
+        if (fd.cFileName[0] == '.' &&
+            (fd.cFileName[1] == '\0' || (fd.cFileName[1] == '.' && fd.cFileName[2] == '\0')))
+            continue;
+        unsigned __int64 t;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            t = newestWrite(pathJoin(folder, fd.cFileName), depth + 1);
+        } else {
+            t = ((unsigned __int64)fd.ftLastWriteTime.dwHighDateTime << 32) |
+                fd.ftLastWriteTime.dwLowDateTime;
+        }
+        if (t > best) best = t;
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return best;
+}
+
+std::string receivedStampPath(const std::string& backups, const std::string& name) {
+    return pathJoin(pathJoin(backups, "received"), name + ".txt");
+}
+
+// After a commit: remember how new the received folder is, outside the save
+// folder (a marker inside it would change its fingerprint and force a full
+// transfer on every coordinated load).
+void noteReceived(const std::string& finalDir, const std::string& name) {
+    const std::string backups = backupsRootFor(finalDir);
+    if (backups.empty()) return;
+    CreateDirectoryA(backups.c_str(), 0);
+    CreateDirectoryA(pathJoin(backups, "received").c_str(), 0);
+    FILE* f = fopen(receivedStampPath(backups, name).c_str(), "wb");
+    if (!f) return;
+    fprintf(f, "%I64u\n", newestWrite(finalDir, 0));
+    fclose(f);
+}
+
+void keepBackup(const std::string& oldDir, const std::string& name) {
+    const std::string backups = backupsRootFor(oldDir);
+    if (backups.empty()) { removeTree(oldDir, 0); return; }
+    // An untouched earlier receipt: nothing of the friend's in it.
+    {
+        FILE* f = fopen(receivedStampPath(backups, name).c_str(), "rb");
+        if (f) {
+            unsigned __int64 got = 0;
+            const int n = fscanf(f, "%I64u", &got);
+            fclose(f);
+            if (n == 1 && got != 0 && newestWrite(oldDir, 0) <= got) {
+                removeTree(oldDir, 0);
+                coop::logLine("[save] replaced an earlier received copy, untouched since: no backup needed");
+                return;
+            }
+        }
+    }
+    CreateDirectoryA(backups.c_str(), 0);
+    SYSTEMTIME st; GetLocalTime(&st);
+    char stamp[32];
+    _snprintf(stamp, sizeof(stamp) - 1, "%04u%02u%02u-%02u%02u%02u ",
+              st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    stamp[sizeof(stamp) - 1] = '\0';
+    std::string dst = pathJoin(backups, std::string(stamp) + name);
+    if (!MoveFileExA(oldDir.c_str(), dst.c_str(), MOVEFILE_WRITE_THROUGH)) {
+        coop::logErrLine("[save] backup of the replaced save FAILED - removed instead");
+        removeTree(oldDir, 0);
+        return;
+    }
+    char b[256];
+    _snprintf(b, sizeof(b) - 1, "[save] BACKUP replaced save kept in '%s'", dst.c_str());
+    b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    // Prune: the folder names start with the timestamp, so sorted = oldest first.
+    std::vector<std::string> all;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pathJoin(backups, "*").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == '.') continue;
+            if (strcmp(fd.cFileName, "received") == 0) continue;
+            all.push_back(fd.cFileName);
+        } while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+    std::sort(all.begin(), all.end());
+    for (size_t i = 0; i + SAVE_BACKUPS_KEPT < all.size(); ++i)
+        removeTree(pathJoin(backups, all[i]), 0);
 }
 
 // A rejected path must never escape the staging folder: reject absolute
@@ -670,7 +783,8 @@ int onSaveDone(const SaveDoneHeader& d, const u32* crcs,
             if (hadOld) MoveFileExA(oldDir.c_str(), finalDir.c_str(),
                                     MOVEFILE_WRITE_THROUGH); // restore
         }
-        if (ok && hadOld) removeTree(oldDir, 0);
+        if (ok && hadOld) keepBackup(oldDir, g_recvName);
+        if (ok) noteReceived(finalDir, g_recvName);
     }
     if (!ok) removeTree(g_recvStaging, 0); // never leave a half-written loadable save
 

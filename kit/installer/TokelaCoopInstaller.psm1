@@ -331,4 +331,93 @@ function Test-DirWritable([string]$Dir) {
     } catch { return $false }
 }
 
+# ---- Diagnostics -----------------------------------------------------------------
+
+# Everything a helper needs to understand a problem from another house, in one
+# zip: the co-op logs (this run and the two before), RE_Kenshi's log, the mod
+# list and the mod diff, the plugin config, the game settings and the versions.
+# Returns the zip path. -KenshiDirs defaults to every install found.
+function New-TokelaCoopDiagnostics {
+    param(
+        [string[]]$KenshiDirs = $null,
+        [string]$OutDir = [Environment]::GetFolderPath('Desktop'),
+        [string]$KitDir = $null
+    )
+    if ($null -eq $KenshiDirs) { $KenshiDirs = @(Find-KenshiInstalls) }
+    if (-not $OutDir -or -not (Test-Path -LiteralPath $OutDir)) { $OutDir = $env:TEMP }
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmm'
+    $work = Join-Path $env:TEMP ('TokelaCoop-diagnostico-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $work | Out-Null
+    try {
+        $summary = New-Object System.Collections.Generic.List[string]
+        $summary.Add("TokelaCoop - diagnostico $stamp")
+        $summary.Add("Windows: " + [Environment]::OSVersion.VersionString)
+        if ($KitDir) {
+            $prov = Join-Path $KitDir 'PROVENANCE.json'
+            if (Test-Path -LiteralPath $prov) { Copy-Item -LiteralPath $prov -Destination (Join-Path $work 'kit-PROVENANCE.json') }
+        }
+        $i = 0
+        foreach ($k in $KenshiDirs) {
+            $i++
+            # Flat names ("kenshi1_<file>"): Windows PowerShell 5.1 writes zip entries
+            # for subfolders with '\', which other systems extract as one long name.
+            $pre = "kenshi${i}_"
+            $summary.Add('')
+            $summary.Add("Kenshi $i : $k")
+            try {
+                $exe = Join-Path $k 'kenshi_x64.exe'
+                if (Test-Path -LiteralPath $exe) {
+                    $ei = Get-Item -LiteralPath $exe
+                    $summary.Add("  kenshi_x64.exe: $($ei.Length) bytes, $($ei.VersionInfo.FileVersion)")
+                }
+                $re = Get-REKenshiState $k
+                $summary.Add("  RE_Kenshi: installed=$($re.Installed) enabled=$($re.Enabled) version=$($re.Version)")
+                $dll = Join-Path $k 'mods\TokelaCoop\TokelaCoop.dll'
+                if (Test-Path -LiteralPath $dll) {
+                    $summary.Add("  TokelaCoop.dll SHA-256: " + (Get-FileHash -Algorithm SHA256 -LiteralPath $dll).Hash)
+                } else {
+                    $summary.Add('  TokelaCoop.dll: NO INSTALADO')
+                }
+            } catch {
+                $summary.Add("  (no se pudo leer la version: $($_.Exception.Message))")
+            }
+            $files = @('kenshi.log', 'RE_Kenshi_log.txt', 'settings.cfg', 'Plugins_x64.cfg', 'data\mods.cfg',
+                       'mods\TokelaCoop\coop_config.json', 'mods\TokelaCoop\RE_Kenshi.json')
+            foreach ($pat in @('TokelaCoop_*.log', 'KenshiCoop_*.log', 'TokelaCoop_mods_diff.txt',
+                               'KenshiCoop_mods_diff.txt')) {
+                foreach ($f in (Get-ChildItem -LiteralPath $k -Filter $pat -File -ErrorAction SilentlyContinue)) {
+                    $files += $f.Name
+                }
+            }
+            foreach ($rel in $files) {
+                $src = Join-Path $k $rel
+                if (-not (Test-Path -LiteralPath $src)) { continue }
+                $out = Join-Path $work ($pre + ($rel -replace '[\\/]', '_'))
+                # Shared read (Kenshi may have the log open); a long log keeps its
+                # last 20 MB. One unreadable file must not lose the rest.
+                try {
+                    $fs = [System.IO.File]::Open($src, 'Open', 'Read', 'ReadWrite')
+                    try {
+                        if ($fs.Length -gt 20MB) { [void]$fs.Seek(-20MB, 'End') }
+                        $o = [System.IO.File]::Create($out)
+                        try { $fs.CopyTo($o) } finally { $o.Close() }
+                    } finally { $fs.Close() }
+                } catch {
+                    $summary.Add("  ${rel}: no se pudo leer ($($_.Exception.Message))")
+                }
+            }
+        }
+        if ($KenshiDirs.Count -eq 0) { $summary.Add(''); $summary.Add('No se ha encontrado Kenshi.') }
+        [System.IO.File]::WriteAllLines((Join-Path $work 'RESUMEN.txt'), $summary.ToArray(),
+                                       (New-Object System.Text.UTF8Encoding($true)))
+        $zip = Join-Path $OutDir ("TokelaCoop-diagnostico-$stamp.zip")
+        if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+        Compress-Archive -Path (Join-Path $work '*') -DestinationPath $zip
+        return $zip
+    } finally {
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+
 Export-ModuleMember -Function *

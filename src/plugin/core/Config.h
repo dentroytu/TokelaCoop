@@ -203,6 +203,11 @@ struct Config {
     // stops town-AI re-tasking. Off by default; for manual A/B runs only.
     bool          noDetach;
 
+    // Harness only (TOKELACOOP_ROLE_VIA_UI == "1"): a JOIN run boots as the
+    // default HOST, the way a real friend's Kenshi does, and joins through the
+    // F2 panel's coopUiConnect path, so role-dependent settings are tested.
+    bool          roleViaUi;
+
     // Divergence-gated authority (TOKELACOOP_GATE_AUTHORITY != "0", join only,
     // DEFAULT ON - promoted 2026-07-05 after the step-4 A/B): world NPCs whose
     // local AI sustainedly agrees with the host's raw task are TRUSTED (not

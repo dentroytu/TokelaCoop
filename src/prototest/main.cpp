@@ -317,8 +317,8 @@ static void testSizes() {
     CHECK_EQ("EVT_SQUAD_MOVE id", (int)EVT_SQUAD_MOVE, 11);
     CHECK("EVT_SQUAD_MOVE distinct", EVT_SQUAD_MOVE != EVT_RECRUIT &&
           EVT_SQUAD_MOVE != EVT_NONE && EVT_SQUAD_MOVE != EVT_EXIT_FURNITURE);
-    CHECK_EQ("PROTOCOL_VERSION (v57: v0.54 own characters + squad owners; refuses v0.53)",
-             (int)PROTOCOL_VERSION, 57);
+    CHECK_EQ("PROTOCOL_VERSION (v58: v0.55 role fix - a v0.54 friend's hits did no damage; refuses v0.54)",
+             (int)PROTOCOL_VERSION, 58);
     CHECK_EQ("PKT_MODLIST id", (int)PKT_MODLIST, 49);
 
     // Protocol 52: the shared money pool. The two players spend from ONE wallet,
@@ -1276,6 +1276,32 @@ static void testModList() {
     CHECK("same game in two folders -> same", coop::diffModLists(va, vb).same());
     CHECK("mods.cfg text leaves the game's own files out",
           coop::modsCfgText(vb) == "Dust.mod\r\nTokelaCoop.mod\r\n");
+
+    // What the engine REALLY lists (TokelaCoop_mods_diff.txt, 2026-10): every
+    // file with its path - Workshop mods by their item folder, local mods by
+    // "mods/<name>/". Counting every path as built-in left mods.cfg empty, so
+    // "Copy friend's mod list" never showed.
+    const char* real = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Kenshi\\data\\gamedata.base|-1\n"
+                       "C:\\Program Files (x86)\\Steam\\steamapps\\workshop\\content\\233860\\3703458265\\Dust.mod|1\n"
+                       "C:\\Program Files (x86)\\Steam\\steamapps\\workshop\\content\\233860\\1772722749\\LivingWorld.mod|1\n"
+                       "mods/TokelaCoop/TokelaCoop.mod|1\n";
+    coop::parseModText(real, (unsigned)std::strlen(real), va);
+    CHECK("real list: 4 entries", va.size() == 4);
+    CHECK("real list: only the data folder is built-in",
+          va.size() == 4 && va[0].builtIn && !va[1].builtIn && !va[2].builtIn && !va[3].builtIn);
+    CHECK("real list: Workshop item id kept as the folder", va.size() == 4 && va[1].folder == "3703458265");
+    CHECK("real list: mods.cfg has every mod (button shows)",
+          coop::modsCfgText(va) == "Dust.mod\r\nLivingWorld.mod\r\nTokelaCoop.mod\r\n");
+    // The short form a v0.55 sender puts on the wire, against a full-path list.
+    const char* shortL = "data/gamedata.base|-1\n3703458265/Dust.mod|1\n1772722749/LivingWorld.mod|1\n"
+                         "TokelaCoop/TokelaCoop.mod|1\n";
+    coop::parseModText(shortL, (unsigned)std::strlen(shortL), vb);
+    CHECK("short form vs full paths -> same", coop::diffModLists(va, vb).same());
+    const char* wsPath = "C:\\Program Files (x86)\\Steam\\steamapps\\workshop\\content\\233860\\3703458265\\Dust.mod";
+    const unsigned int s0 = coop::modShortStart(wsPath, (unsigned)std::strlen(wsPath));
+    CHECK("short form keeps folder + name", std::string(wsPath + s0) == "3703458265\\Dust.mod");
+    CHECK("a bare name stays whole", coop::modShortStart("Dust.mod", 8) == 0);
+    CHECK("a Workshop line shrinks to ~20 bytes", std::strlen(wsPath + s0) < 25);
 }
 
 static void testRefusal() {
@@ -1485,7 +1511,7 @@ static void testRefusalClient() {
         n = std::string("FULL: amber, keeps trying, own stale connection first") + tag;
         CHECK(n.c_str(), !full.final && full.level == 1 &&
                          full.notice.find(es ? "conexi\xC3\xB3n anterior" : "previous connection") != std::string::npos);
-        n = std::string("HOST_CLOSED (reserved) worded as soft") + tag;
+        n = std::string("HOST_CLOSED (sent by a stopping host, v0.55+) worded as soft") + tag;
         CHECK(n.c_str(), !closed.final && closed.level == 1);
         n = std::string("unknown final reason: generic, stops") + tag;
         CHECK(n.c_str(), unkFinal.final && unkFinal.notice.find("5") != std::string::npos);

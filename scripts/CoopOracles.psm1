@@ -193,6 +193,7 @@ function Invoke-OneOracle {
         "mint_aggro"    { return (Test-MintAggro      -HostFile $HostLog -JoinFile $JoinLog) }
         "proxy_drift"   { return (Test-ProxyDrift     -JoinFile $JoinLog) }
         "pc_assault"    { return (Test-PcAssault       -HostFile $HostLog -JoinFile $JoinLog) }
+        "role_via_ui"   { return (Test-RoleViaUi       -JoinFile $JoinLog) }
         "player_ko"     { return (Test-PlayerKo        -HostFile $HostLog -JoinFile $JoinLog) }
         "medic_order"   { return (Test-MedicOrder      -HostFile $HostLog -JoinFile $JoinLog) }
         "limb_loss"     { return (Test-LimbLoss        -HostFile $HostLog -JoinFile $JoinLog) }

@@ -238,6 +238,49 @@ try {
     $bad = Join-Path $tmp 'bad.zip'
     Set-Content -LiteralPath $bad -Value 'tampered'
     Check 'hash check rejects a tampered file' (-not (Test-FileSha256 $bad $rel.Sha256))
+
+    Write-Host '== diagnostics zip =='
+    $errs = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile(
+        (Join-Path $instDir 'Collect-Diagnostics.ps1'), [ref]$null, [ref]$errs)
+    Check 'Collect-Diagnostics.ps1 has no parse errors' ($errs.Count -eq 0)
+    Check 'diagnostics launcher exists' (Test-Path -LiteralPath (Join-Path $repoRoot 'kit\Recoger diagnostico.cmd'))
+    $kd = New-FakeKenshi (Join-Path $tmp 'Diag\Kenshi')
+    New-Item -ItemType Directory -Force -Path (Join-Path $kd 'data'), (Join-Path $kd 'mods\TokelaCoop') | Out-Null
+    Set-Content -LiteralPath (Join-Path $kd 'TokelaCoop_join.log') -Value 'this run'
+    Set-Content -LiteralPath (Join-Path $kd 'TokelaCoop_join.1.log') -Value 'previous run'
+    Set-Content -LiteralPath (Join-Path $kd 'data\mods.cfg') -Value 'Dust.mod'
+    Set-Content -LiteralPath (Join-Path $kd 'mods\TokelaCoop\coop_config.json') -Value '{}'
+    Set-Content -LiteralPath (Join-Path $kd 'save_secret.txt') -Value 'not collected'
+    $outD = Join-Path $tmp 'DiagOut'
+    New-Item -ItemType Directory -Force -Path $outD | Out-Null
+    $zipD = New-TokelaCoopDiagnostics -KenshiDirs @($kd) -OutDir $outD
+    Check 'diagnostics zip written' (Test-Path -LiteralPath $zipD)
+    $exD = Join-Path $tmp 'DiagEx'
+    Expand-Archive -LiteralPath $zipD -DestinationPath $exD -Force
+    $names = @(Get-ChildItem -LiteralPath $exD -Recurse -File | ForEach-Object { $_.Name })
+    Check 'zip holds both runs of the log, mods.cfg, the config and a summary' (
+        ($names -contains 'kenshi1_TokelaCoop_join.log') -and ($names -contains 'kenshi1_TokelaCoop_join.1.log') -and
+        ($names -contains 'kenshi1_data_mods.cfg') -and ($names -contains 'kenshi1_mods_TokelaCoop_coop_config.json') -and
+        ($names -contains 'RESUMEN.txt'))
+    Check 'zip leaves other files out' (-not ($names -match 'save_secret'))
+    Check 'zip entries are flat (no subfolders)' (@(Get-ChildItem -LiteralPath $exD -Directory).Count -eq 0)
+    # A file Kenshi holds open (no read sharing) must not lose the rest.
+    $lockF = Join-Path $kd 'TokelaCoop_host.log'
+    Set-Content -LiteralPath $lockF -Value 'locked'
+    $lock = [System.IO.File]::Open($lockF, 'Open', 'ReadWrite', 'None')
+    try {
+        $zipL = New-TokelaCoopDiagnostics -KenshiDirs @($kd) -OutDir $outD
+        $exL = Join-Path $tmp 'DiagExL'
+        Expand-Archive -LiteralPath $zipL -DestinationPath $exL -Force
+        $sum = Get-Content -LiteralPath (Join-Path $exL 'RESUMEN.txt') -Raw
+        Check 'an unreadable log is noted and the zip still made' (
+            (Test-Path -LiteralPath (Join-Path $exL 'kenshi1_TokelaCoop_join.log')) -and ($sum -match 'TokelaCoop_host.log: no se pudo leer'))
+    } finally { $lock.Close() }
+    $errs = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile(
+        (Join-Path $instDir 'Collect-Diagnostics.ps1'), [ref]$null, [ref]$errs)
+    Check 'Collect-Diagnostics.ps1 still parses' ($errs.Count -eq 0)
 } catch {
     $script:Fail++
     Write-Host "  FAIL unexpected error: $($_.Exception.Message)"

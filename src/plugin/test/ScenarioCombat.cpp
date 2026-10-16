@@ -2204,6 +2204,9 @@ Scenario* makeCombatScenario(const std::string& name) {
     if (name == "combat_battle") return new CombatBattleScenario();
     if (name == "combat_win")    return new CombatWinScenario();
     if (name == "pc_assault")   return new PcAssaultScenario();
+    // The same, with the join booting as HOST and joining via the F2 panel path
+    // (TOKELACOOP_ROLE_VIA_UI=1 in the manifest).
+    if (name == "pc_assault_ui") return new PcAssaultScenario();
     return 0;
 }
 

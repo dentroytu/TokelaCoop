@@ -25,7 +25,8 @@ enum DropKind {
 
 // A host that predates the refusal codes (v0.53 and older) refuses a different
 // version with data 0, right after our HELLO. An ENet timeout cannot come that
-// soon: ENet times a peer out no earlier than ENET_PEER_TIMEOUT_MINIMUM (5000 ms)
+// soon: ENet times a peer out no earlier than its timeout minimum (10000 ms since
+// v0.55, tunePeerTimeout; 5000 ms before)
 // after the attempt started, which is why the window is measured from the
 // attempt's start and not from the CONNECT event.
 const unsigned long LEGACY_WINDOW_MS = 4000;

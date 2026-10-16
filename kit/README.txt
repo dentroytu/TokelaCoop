@@ -17,6 +17,16 @@ INSTALAR (los dos jugadores) - en español
   Para actualizar, descarga el zip nuevo y repite. Para jugar: mira PLAY abajo
   (el anfitrión pulsa F2 > "Invite a Steam friend").
 
+  ¿ALGO VA MAL? Doble clic en "Recoger diagnostico.cmd": deja en el Escritorio
+  un zip con los logs, la lista de mods y las versiones (no tus partidas; los
+  logs llevan tu Steam ID y el de tu amigo). Mándaselo a quien te ayude. Los
+  logs de las dos veces anteriores que abriste Kenshi también se guardan
+  (TokelaCoop_*.1.log y .2.log), así que no se pierden al reabrirlo.
+  Cuando la partida que llega del anfitrión sustituye una que ya tenías con el
+  mismo nombre, la anterior se guarda en %LOCALAPPDATA%\kenshi\TokelaCoop_backups
+  (las 3 últimas, también copias viejas de la del anfitrión): si era tuya,
+  sácala de ahí cuanto antes.
+
 INSTALL (both players)
 ----------------------
   1. Extract the whole zip anywhere.
@@ -99,6 +109,12 @@ UNINSTALL
 
 TROUBLESHOOTING
 ---------------
+  * Anything odd: double-click "Recoger diagnostico.cmd" and send the zip it
+    leaves on the Desktop (logs of this run and the two before - with both
+    Steam IDs -, mod list, versions; not your saves). When a received save
+    replaces one you had with the same name, the old one goes to
+    %LOCALAPPDATA%\kenshi\TokelaCoop_backups (the newest 3 replacements, older
+    copies of the host's save included): move yours out of there soon.
   * "The co-op plugin has not started": RE_Kenshi didn't load it. Check
     <Kenshi>\RE_Kenshi_log.txt for 'TokelaCoop'; reinstalling RE_Kenshi
     usually fixes it.
@@ -107,10 +123,11 @@ TROUBLESHOOTING
     confirm it matches). If "Paste friend's Steam ID" says the clipboard wasn't
     a Steam ID, have your friend re-copy theirs with "Copy my Steam ID". Look for
     '[steam] session ... active=1' in <Kenshi>\TokelaCoop_*.log.
-  * "Mods: DIFFERENT" on the F2 panel: you and your friend don't have the same
+  * "Mods DIFFERENT: ..." (Spanish: "Mods DISTINTOS: ...") on the F2 panel: you and your friend don't have the same
     mods, versions or load order. <Kenshi>\TokelaCoop_mods_diff.txt lists every
     difference; "Copy friend's mod list" copies their load order. The check
-    only warns, it never blocks the connection (new, not yet tested in-game).
+    only warns, it never blocks the connection. With very many mods it may say
+    the lists are too long to compare them all: check them by hand.
   * "your friend has another version" on the F2 panel: one player has an
     older/newer build with a different network protocol; both should use the
     same release. If it says "probably KenshiCoop", your friend still has the

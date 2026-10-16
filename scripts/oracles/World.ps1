@@ -2904,3 +2904,32 @@ function Test-CellProbe {
                             tabs = $m.tabs; tabCells = $m.tabCells; samples = $m.samples
                             hostCellX = $h.cellX; joinCellX = $j.cellX })
 }
+
+# role_via_ui (v0.55): the join must really have booted as the default HOST and
+# switched to JOIN through the F2 panel's path - otherwise pc_assault_ui /
+# store_sync_ui would pass as plain copies of their base scenarios (stale DLL,
+# DiagEnv not applied). Gate: the boot line, then the HOST settings, then the
+# JOIN settings with the combat report on, in that order.
+function Test-RoleViaUi {
+    param([string]$JoinFile)
+    if (-not (Test-Path $JoinFile)) {
+        return (Add-GateResult -Name "role_via_ui" -Status FAIL -Detail "no join log")
+    }
+    $boot = Select-String -Path $JoinFile -Pattern "\[role\] TOKELACOOP_ROLE_VIA_UI=1" | Select-Object -First 1
+    $asHost = Select-String -Path $JoinFile -Pattern "\[role\] HOST: .*combatReport=0" | Select-Object -First 1
+    $asJoin = Select-String -Path $JoinFile -Pattern "\[role\] JOIN: .*combatReport=1 storeCensus=0" | Select-Object -First 1
+    $why = @()
+    if (-not $boot) { $why += "the join did not boot via the panel path (no TOKELACOOP_ROLE_VIA_UI line)" }
+    if (-not $asHost) { $why += "no HOST settings at boot" }
+    if (-not $asJoin) { $why += "no JOIN settings with the combat report after the switch" }
+    if ($boot -and $asHost -and $asJoin -and
+        -not ($boot.LineNumber -lt $asHost.LineNumber -and $asHost.LineNumber -lt $asJoin.LineNumber)) {
+        $why += "the role lines are out of order"
+    }
+    if ($why.Count -gt 0) {
+        Write-Host ("  ROLE-VIA-UI FAIL - " + ($why -join '; '))
+        return (Add-GateResult -Name "role_via_ui" -Status FAIL -Detail ($why -join '; '))
+    }
+    Write-Host "  ROLE-VIA-UI PASS - booted as HOST, switched to JOIN via the panel, combat report on"
+    return (Add-GateResult -Name "role_via_ui" -Status PASS)
+}
