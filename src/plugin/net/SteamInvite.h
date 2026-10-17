@@ -46,6 +46,14 @@ bool ready();
 // friend list is broken by a Steam-client web-view bug on many titles.)
 void beginInvite();
 
+// Host action: open the game to Steam friends without picking one. Creates the
+// same friends-only lobby; while it is open, a friend with Kenshi running joins
+// from the Steam friends list (right-click the host -> "Join Game"), which their
+// game receives as GameLobbyJoinRequested - the path an accepted invite takes.
+void openToFriends();
+// The host's lobby is open (or being created) and nobody has joined it yet.
+bool lobbyOpen();
+
 // Send a direct Steam lobby invite to a specific friend (from the picker). The
 // friend gets a Steam notification; clicking it fires GameLobbyJoinRequested on
 // their side and auto-joins. If the lobby is still being created, the invite is
@@ -72,7 +80,8 @@ const char* status();
 // statusArg() is the invited friend's name for ST_INVITED ("" otherwise).
 enum StatusCode {
     ST_IDLE = 0, ST_PICK = 1, ST_INVITED = 2, ST_LOBBY_FAILED = 3, ST_FRIEND_JOINED = 4,
-    ST_JOINING = 5, ST_CONNECTING = 6, ST_VERSION = 7, ST_NO_STEAM = 8, ST_INVITE_SENT = 9
+    ST_JOINING = 5, ST_CONNECTING = 6, ST_VERSION = 7, ST_NO_STEAM = 8, ST_INVITE_SENT = 9,
+    ST_OPEN = 10   // openToFriends: waiting for a friend to "Join Game" from Steam
 };
 int         statusCode();
 const char* statusArg();

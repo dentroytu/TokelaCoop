@@ -312,6 +312,12 @@ void (*g_titleUpdate_orig)(TitleScreen*)   = 0;
 void startNetworking();
 void coopUiConnect(bool isHost, bool useSteam, unsigned long long peerId);
 void coopUiDisconnect();
+// "Close my game to friends" (F2): leave the Steam lobby a friend could "Join
+// Game" through. Nothing else changes (no session runs yet on that path).
+void coopUiCloseLobby() {
+    coop::steaminvite::reset();
+    coop::logLine("[coop-ui] Steam lobby closed");
+}
 
 // Log to BOTH our dedicated per-line-flushed file (what the test runner reads)
 // and the engine's kenshi.log (handy when attached live).
@@ -1629,9 +1635,12 @@ void coopPanelDrive(bool atTitle) {
     ps.lastFriendWasHost = g_lastFriend.wasHost;
     ps.newVersion        = coop::update::newerVersion();
 
+    ps.lobbyOpen = coop::steaminvite::lobbyOpen();
     coop::engine::coopPanelTick(&ps, &coopUiConnect, &coopUiDisconnect,
                                 &coop::steaminvite::beginInvite,
-                                &coop::steaminvite::inviteFriend);
+                                &coop::steaminvite::inviteFriend,
+                                &coop::steaminvite::openToFriends,
+                                &coopUiCloseLobby);
     if (g_peerPresent && g_modsWarn) detail += coop::L(" - mods distintos (F2)", " - mods differ (F2)");
     // The banner always leads with the product name and version, and stays up
     // (just the name) while co-op is off, so a player can always see which

@@ -191,7 +191,7 @@ Item[] items = [wanderer2, wandererSquad2, wandererStart, plusWanderer, plusSqua
 
 // ---- 4) Assemble and write ---------------------------------------------------
 var header = new Header(1, "",
-    "TokelaCoop v0.59 (formerly KenshiCoop) - co-op for two players. This is the data half of the " +
+    "TokelaCoop v0.60 (formerly KenshiCoop) - co-op for two players. This is the data half of the " +
     "mod: two co-op game starts. \"TokelaCoop (Wanderer x2)\" is the vanilla Wanderer start with two " +
     "wanderers, each already in their own squad, so the host plays squad 1 and the joining player " +
     "takes squad 2. \"TokelaCoop+ (Wanderer x2)\" is the same start with 500,000 cats in the shared " +

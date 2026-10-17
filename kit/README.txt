@@ -17,6 +17,9 @@ INSTALAR (los dos jugadores) - en español
   Para actualizar, descarga el zip nuevo y repite. Para jugar: mira PLAY abajo
   (el anfitrión pulsa F2 > "Invitar a un amigo de Steam"). Las siguientes
   veces, los dos pulsáis F2 > "Volver a jugar con <amigo>".
+  Sin invitación: el anfitrión pulsa F2 > "Abrir mi partida a mis amigos de
+  Steam" y el amigo, con Kenshi ya abierto, hace clic derecho en su nombre en
+  la lista de amigos de Steam y pulsa "Unirse a la partida".
 
   VERSIONES NUEVAS: al abrir Kenshi, TokelaCoop pregunta a GitHub cuál es la
   última versión (solo eso) y, si hay una más nueva, F2 lo dice y trae un botón
@@ -77,6 +80,12 @@ PLAY (Steam - recommended)
   NEXT TIME / LA PRÓXIMA VEZ: F2 remembers your friend. Both of you press
   "Volver a jugar con <amigo>" ("Play again with <friend>"): the host waits for
   that friend and the friend connects - no invite, no Steam IDs.
+
+  NO INVITE / SIN INVITACIÓN: the HOST presses F2 > "Abrir mi partida a mis
+  amigos de Steam" ("Open my game to Steam friends"). The friend, with Kenshi
+  ALREADY running (main menu is fine), right-clicks the host in the Steam
+  friends list and picks "Unirse a la partida" ("Join Game"). "Cerrar la
+  partida a mis amigos" closes it again.
 
   1. Press F2 to open the Co-op panel. It works at the MAIN MENU (before loading
      a game) as well as in-game.
