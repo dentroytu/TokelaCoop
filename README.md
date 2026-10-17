@@ -1,9 +1,9 @@
 # TokelaCoop
 
-**Current version: v0.56.** Up to v0.53 this project was called **KenshiCoop**.
+**Current version: v0.57.** Up to v0.53 this project was called **KenshiCoop**.
 TokelaCoop is a modified fork of [nhoral/KenshiCoop](https://github.com/nhoral/KenshiCoop).
 In game, the top-left banner and the F2 panel title show the name and the
-version ("TokelaCoop v0.56"): check that you and your friend see the same one.
+version ("TokelaCoop v0.57"): check that you and your friend see the same one.
 
 Setup + Demo (upstream KenshiCoop): [https://www.youtube.com/watch?v=OqwVRRZEYGM](https://www.youtube.com/watch?v=OqwVRRZEYGM)
 
@@ -201,7 +201,9 @@ is needed after an edit.
   as `TokelaCoop_*.1.log` / `.2.log`), the mod list and the versions - not your
   saves; the logs hold both players' Steam IDs. When a received save replaces
   one you had with the same name, the old one is kept in
-  `%LOCALAPPDATA%\kenshi\TokelaCoop_backups` (the newest 3).
+  `%LOCALAPPDATA%\kenshi\TokelaCoop_backups` (the newest 3 of each save, 9 in
+  all). When your friend saves under the name of a different save of the host's,
+  the host's is copied there first.
 - **"your friend has an older version of the mod (probably KenshiCoop ...)"** -
   your friend still has the old KenshiCoop (v0.53 or older). Since v0.54 the two
   refuse each other instead of playing with different rules: they should run the

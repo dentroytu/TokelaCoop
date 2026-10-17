@@ -24,8 +24,9 @@ INSTALAR (los dos jugadores) - en español
   (TokelaCoop_*.1.log y .2.log), así que no se pierden al reabrirlo.
   Cuando la partida que llega del anfitrión sustituye una que ya tenías con el
   mismo nombre, la anterior se guarda en %LOCALAPPDATA%\kenshi\TokelaCoop_backups
-  (las 3 últimas, también copias viejas de la del anfitrión): si era tuya,
-  sácala de ahí cuanto antes.
+  (las 3 últimas de cada partida, 9 como mucho): si era tuya, sácala de ahí
+  cuanto antes. Al guardar, el amigo ve en el banner de arriba "guardando..." y
+  después "partida guardada" (la guarda el anfitrión y llega a los dos).
 
 INSTALL (both players)
 ----------------------
@@ -115,8 +116,8 @@ TROUBLESHOOTING
     leaves on the Desktop (logs of this run and the two before - with both
     Steam IDs -, mod list, versions; not your saves). When a received save
     replaces one you had with the same name, the old one goes to
-    %LOCALAPPDATA%\kenshi\TokelaCoop_backups (the newest 3 replacements, older
-    copies of the host's save included): move yours out of there soon.
+    %LOCALAPPDATA%\kenshi\TokelaCoop_backups (the newest 3 of each save, 9 in
+    all): move yours out of there soon.
   * "The co-op plugin has not started": RE_Kenshi didn't load it. Check
     <Kenshi>\RE_Kenshi_log.txt for 'TokelaCoop'; reinstalling RE_Kenshi
     usually fixes it.

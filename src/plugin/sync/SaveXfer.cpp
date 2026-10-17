@@ -83,7 +83,7 @@ void walkFolder(const std::string& folder, int depth, unsigned int* files,
 
 // Recursive walk collecting RELATIVE file paths + sizes (the transfer's file
 // list). 'prefix' is the accumulated relative path ("" at the root).
-struct XferFile { std::string rel; unsigned __int64 size; };
+struct XferFile { std::string rel; unsigned __int64 size; unsigned __int64 write; };
 void collectFiles(const std::string& folder, const std::string& prefix, int depth,
                   std::vector<XferFile>* out) {
     if (depth > 4) return;
@@ -103,6 +103,8 @@ void collectFiles(const std::string& folder, const std::string& prefix, int dept
             XferFile xf;
             xf.rel  = rel;
             xf.size = ((unsigned __int64)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+            xf.write = ((unsigned __int64)fd.ftLastWriteTime.dwHighDateTime << 32) |
+                       fd.ftLastWriteTime.dwLowDateTime;
             out->push_back(xf);
         }
     } while (FindNextFileA(h, &fd));
@@ -148,98 +150,81 @@ void removeTree(const std::string& folder, int depth) {
 // save had the same name as the host's lost it with no warning. Moved (same
 // volume: instant) to <saves>\..\TokelaCoop_backups\"<yyyyMMdd-HHmmss> <name>",
 // outside the save folder so Kenshi's load menu does not list it; only the newest
-// SAVE_BACKUPS_KEPT are kept (saves are 30+ MB). A folder that is only an earlier
-// RECEIVED copy, untouched since (the host streams every save it makes), is not
-// worth a backup - keeping those would push the friend's own save out of the
-// three - so it is removed as before (see noteReceived).
-const unsigned int SAVE_BACKUPS_KEPT = 3;
+// SAVE_BACKUPS_KEPT of each save name are kept, and SAVE_BACKUPS_TOTAL in all
+// (saves are 30+ MB): the host's autosaves arrive as autosave0..2, which must not
+// push the friend's own main save out. A folder that is exactly an earlier
+// RECEIVED copy (same content fingerprint as when it arrived - see noteReceived)
+// is not worth a backup, so it is removed as before. The check is by content, not
+// by file dates: a backup the friend put back by hand keeps its old dates.
+const unsigned int SAVE_BACKUPS_KEPT  = 3;
+const unsigned int SAVE_BACKUPS_TOTAL = 9;
 
-// <saves>\..\TokelaCoop_backups for a folder inside the save folder; "" when the
-// path has no parent to put it in (the backups would land among the saves).
-std::string backupsRootFor(const std::string& saveDir) {
+// <saves>\..\<leaf> for a folder inside the save folder: next to the saves on the
+// same volume (a rename moves a folder there instantly) but outside the folder
+// Kenshi's load menu lists. "" when the path has no parent to put it in.
+std::string besideSavesFor(const std::string& saveDir, const char* leaf) {
     std::string::size_type cut = saveDir.find_last_of("\\/");
     if (cut == std::string::npos) return std::string();
     std::string saves = saveDir.substr(0, cut);                  // ...\save
     cut = saves.find_last_of("\\/");
     if (cut == std::string::npos) return std::string();
-    return pathJoin(saves.substr(0, cut), "TokelaCoop_backups");
+    return pathJoin(saves.substr(0, cut), leaf);
 }
 
-// Newest last-write time of any file in a folder tree (0 if none).
-unsigned __int64 newestWrite(const std::string& folder, int depth) {
-    unsigned __int64 best = 0;
-    if (depth > 6) return best;
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA(pathJoin(folder, "*").c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) return best;
-    do {
-        if (fd.cFileName[0] == '.' &&
-            (fd.cFileName[1] == '\0' || (fd.cFileName[1] == '.' && fd.cFileName[2] == '\0')))
-            continue;
-        unsigned __int64 t;
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            t = newestWrite(pathJoin(folder, fd.cFileName), depth + 1);
-        } else {
-            t = ((unsigned __int64)fd.ftLastWriteTime.dwHighDateTime << 32) |
-                fd.ftLastWriteTime.dwLowDateTime;
-        }
-        if (t > best) best = t;
-    } while (FindNextFileA(h, &fd));
-    FindClose(h);
-    return best;
+std::string backupsRootFor(const std::string& saveDir) {
+    return besideSavesFor(saveDir, "TokelaCoop_backups");
+}
+
+// Fingerprint of a folder on disk (folderFingerprintOf over every file); 0 when
+// it is missing, empty or unreadable.
+u32 folderFingerprintAt(const std::string& folder) {
+    std::vector<XferFile> files;
+    collectFiles(folder, "", 0, &files);
+    if (files.empty() || files.size() > 4096) return 0;
+    std::vector<unsigned int> crcs(files.size(), 0);
+    std::vector<const char*>  paths(files.size(), (const char*)0);
+    std::vector<unsigned char> buf(65536);
+    for (size_t i = 0; i < files.size(); ++i) {
+        paths[i] = files[i].rel.c_str();
+        HANDLE h = CreateFileA(pathJoin(folder, files[i].rel).c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0, OPEN_EXISTING, 0, 0);
+        if (h == INVALID_HANDLE_VALUE) return 0; // unreadable = unknown
+        unsigned int crc = fnv1aInit();
+        DWORD got = 0;
+        while (ReadFile(h, &buf[0], (DWORD)buf.size(), &got, 0) && got > 0)
+            crc = fnv1aUpdate(crc, &buf[0], (unsigned int)got);
+        CloseHandle(h);
+        crcs[i] = crc;
+    }
+    return folderFingerprintOf(&paths[0], &crcs[0], (unsigned int)files.size());
 }
 
 std::string receivedStampPath(const std::string& backups, const std::string& name) {
     return pathJoin(pathJoin(backups, "received"), name + ".txt");
 }
 
-// After a commit: remember how new the received folder is, outside the save
-// folder (a marker inside it would change its fingerprint and force a full
-// transfer on every coordinated load).
-void noteReceived(const std::string& finalDir, const std::string& name) {
+// After a commit: remember what the received folder holds (its fingerprint),
+// outside the save folder (a marker inside it would change the fingerprint and
+// force a full transfer on every coordinated load).
+void noteReceived(const std::string& finalDir, const std::string& name, u32 fp) {
     const std::string backups = backupsRootFor(finalDir);
-    if (backups.empty()) return;
+    if (backups.empty() || fp == 0) return;
     CreateDirectoryA(backups.c_str(), 0);
     CreateDirectoryA(pathJoin(backups, "received").c_str(), 0);
     FILE* f = fopen(receivedStampPath(backups, name).c_str(), "wb");
     if (!f) return;
-    fprintf(f, "%I64u\n", newestWrite(finalDir, 0));
+    fprintf(f, "fp=%08x\n", fp);
     fclose(f);
 }
 
-void keepBackup(const std::string& oldDir, const std::string& name) {
-    const std::string backups = backupsRootFor(oldDir);
-    if (backups.empty()) { removeTree(oldDir, 0); return; }
-    // An untouched earlier receipt: nothing of the friend's in it.
-    {
-        FILE* f = fopen(receivedStampPath(backups, name).c_str(), "rb");
-        if (f) {
-            unsigned __int64 got = 0;
-            const int n = fscanf(f, "%I64u", &got);
-            fclose(f);
-            if (n == 1 && got != 0 && newestWrite(oldDir, 0) <= got) {
-                removeTree(oldDir, 0);
-                coop::logLine("[save] replaced an earlier received copy, untouched since: no backup needed");
-                return;
-            }
-        }
-    }
-    CreateDirectoryA(backups.c_str(), 0);
-    SYSTEMTIME st; GetLocalTime(&st);
-    char stamp[32];
-    _snprintf(stamp, sizeof(stamp) - 1, "%04u%02u%02u-%02u%02u%02u ",
-              st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-    stamp[sizeof(stamp) - 1] = '\0';
-    std::string dst = pathJoin(backups, std::string(stamp) + name);
-    if (!MoveFileExA(oldDir.c_str(), dst.c_str(), MOVEFILE_WRITE_THROUGH)) {
-        coop::logErrLine("[save] backup of the replaced save FAILED - removed instead");
-        removeTree(oldDir, 0);
-        return;
-    }
-    char b[256];
-    _snprintf(b, sizeof(b) - 1, "[save] BACKUP replaced save kept in '%s'", dst.c_str());
-    b[sizeof(b) - 1] = '\0'; coop::logLine(b);
-    // Prune: the folder names start with the timestamp, so sorted = oldest first.
+// The save name of a backup folder ("<yyyyMMdd-HHmmss> <name>").
+std::string backupSaveName(const std::string& folder) {
+    std::string::size_type sp = folder.find(' ');
+    return (sp == std::string::npos) ? folder : folder.substr(sp + 1);
+}
+
+void pruneBackups(const std::string& backups) {
+    // The folder names start with the timestamp, so sorted = oldest first.
     std::vector<std::string> all;
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA(pathJoin(backups, "*").c_str(), &fd);
@@ -252,8 +237,81 @@ void keepBackup(const std::string& oldDir, const std::string& name) {
         FindClose(h);
     }
     std::sort(all.begin(), all.end());
-    for (size_t i = 0; i + SAVE_BACKUPS_KEPT < all.size(); ++i)
+    std::vector<bool> drop(all.size(), false);
+    // Newest first: past SAVE_BACKUPS_KEPT of one name, or SAVE_BACKUPS_TOTAL in all.
+    unsigned int kept = 0;
+    for (size_t k = all.size(); k-- > 0; ) {
+        unsigned int sameName = 0;
+        const std::string nm = backupSaveName(all[k]);
+        for (size_t j = k + 1; j < all.size(); ++j)
+            if (!drop[j] && _stricmp(backupSaveName(all[j]).c_str(), nm.c_str()) == 0) ++sameName;
+        if (sameName >= SAVE_BACKUPS_KEPT || kept >= SAVE_BACKUPS_TOTAL) { drop[k] = true; continue; }
+        ++kept;
+    }
+    for (size_t i = 0; i < all.size(); ++i) {
+        if (!drop[i]) continue;
         removeTree(pathJoin(backups, all[i]), 0);
+        char b[320];
+        _snprintf(b, sizeof(b) - 1, "[save] BACKUP pruned '%s'", all[i].c_str());
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+}
+
+// Copy a folder tree (depth-capped like the walkers). False on any failure.
+bool copyTree(const std::string& src, const std::string& dst, int depth) {
+    if (depth > 6) return false;
+    if (!CreateDirectoryA(dst.c_str(), 0) && GetLastError() != ERROR_ALREADY_EXISTS) return false;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pathJoin(src, "*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return true;
+    bool ok = true;
+    do {
+        if (fd.cFileName[0] == '.' &&
+            (fd.cFileName[1] == '\0' || (fd.cFileName[1] == '.' && fd.cFileName[2] == '\0')))
+            continue;
+        const std::string s = pathJoin(src, fd.cFileName), d = pathJoin(dst, fd.cFileName);
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ok = copyTree(s, d, depth + 1) && ok;
+        else ok = (CopyFileA(s.c_str(), d.c_str(), FALSE) != 0) && ok;
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return ok;
+}
+
+void keepBackup(const std::string& oldDir, const std::string& name) {
+    const std::string backups = backupsRootFor(oldDir);
+    if (backups.empty()) { removeTree(oldDir, 0); return; }
+    // Exactly an earlier receipt: nothing of the friend's in it.
+    {
+        FILE* f = fopen(receivedStampPath(backups, name).c_str(), "rb");
+        if (f) {
+            unsigned int got = 0;
+            const int n = fscanf(f, "fp=%x", &got);
+            fclose(f);
+            if (n == 1 && got != 0 && folderFingerprintAt(oldDir) == got) {
+                removeTree(oldDir, 0);
+                coop::logLine("[save] replaced an earlier received copy, unchanged since: no backup needed");
+                return;
+            }
+        }
+    }
+    CreateDirectoryA(backups.c_str(), 0);
+    SYSTEMTIME st; GetLocalTime(&st);
+    char stamp[32];
+    _snprintf(stamp, sizeof(stamp) - 1, "%04u%02u%02u-%02u%02u%02u ",
+              st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    stamp[sizeof(stamp) - 1] = '\0';
+    std::string dst = pathJoin(backups, std::string(stamp) + name);
+    if (GetFileAttributesA(dst.c_str()) != INVALID_FILE_ATTRIBUTES) dst += " (2)";
+    if (!MoveFileExA(oldDir.c_str(), dst.c_str(), MOVEFILE_WRITE_THROUGH | MOVEFILE_COPY_ALLOWED)) {
+        // Never delete the friend's save for want of a backup: it stays as
+        // "<name>__old" next to the new one (the next commit restores or reuses it).
+        coop::logErrLine("[save] backup of the replaced save FAILED - left as <name>__old");
+        return;
+    }
+    char b[320];
+    _snprintf(b, sizeof(b) - 1, "[save] BACKUP replaced save kept in '%s'", dst.c_str());
+    b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    pruneBackups(backups);
 }
 
 // A rejected path must never escape the staging folder: reject absolute
@@ -293,14 +351,43 @@ void sendCloseFile() {
     }
 }
 
-void sendAbort(const char* why) {
+int         g_sendAbortReason = 0;   // SEND_ABORT_* of the last abort, until taken
+std::string g_sendAbortName;
+
+// Stop the active send. With a link, the friend is told at once: a DONE with no
+// files fails its verify, so it drops the staging and stops waiting for chunks
+// that will never come (it used to show "receiving... N%" forever).
+void sendAbort(NetLink* net, u32 localId, int reason, const char* why) {
+    if (!g_sendActive) return;
     char b[192];
     _snprintf(b, sizeof(b) - 1, "[save] XFER-ABORT id=%u %s", g_sendXferId, why);
     b[sizeof(b) - 1] = '\0'; coop::logErrLine(b);
+    if (net) {
+        SaveDoneHeader dh;
+        memset(&dh, 0, sizeof(dh));
+        dh.type      = (u8)PKT_SAVE_DONE;
+        dh.ownerId   = localId;
+        dh.xferId    = g_sendXferId;
+        dh.fileCount = 0;
+        net->queueSaveDone(dh, 0, 0);
+    }
     sendCloseFile();
     g_sendActive = false;
     g_sendFiles.clear();
     g_sendCrcs.clear();
+    g_sendAbortReason = reason;
+    g_sendAbortName   = g_sendName;
+}
+
+// Size + last write of an open file: the snapshot the send started from must
+// still hold, or the bytes would be a mix of two saves under a matching CRC.
+bool sameAsSnapshot(HANDLE h, const XferFile& xf) {
+    BY_HANDLE_FILE_INFORMATION fi;
+    if (!GetFileInformationByHandle(h, &fi)) return false;
+    const unsigned __int64 size = ((unsigned __int64)fi.nFileSizeHigh << 32) | fi.nFileSizeLow;
+    const unsigned __int64 wt = ((unsigned __int64)fi.ftLastWriteTime.dwHighDateTime << 32) |
+                                fi.ftLastWriteTime.dwLowDateTime;
+    return size == xf.size && wt == xf.write;
 }
 
 #endif // !TOKELACOOP_PROTOTEST (sender state)
@@ -318,6 +405,7 @@ int              g_recvOpenIdx = -1;   // fileIdx of the open handle
 HANDLE           g_recvHandle = INVALID_HANDLE_VALUE;
 std::vector<u32> g_recvCrcs;           // incremental FNV per fileIdx
 std::vector<u8>  g_recvSeen;           // fileIdx touched at least once
+std::vector<std::string> g_recvPaths;  // relative path per fileIdx (the commit fingerprint)
 unsigned long    g_recvStartTick = 0;
 
 // Scenario gate accessors' backing state.
@@ -397,28 +485,60 @@ bool folderInventory(const std::string& folder, unsigned int* outFiles,
 }
 
 u32 folderFingerprint(const std::string& name) {
-    std::string folder = saveFolderFor(name);
-    std::vector<XferFile> files;
-    collectFiles(folder, "", 0, &files);
-    if (files.empty() || files.size() > 4096) return 0;
+    if (!saveNameSafe(name)) return 0;
+    return folderFingerprintAt(saveFolderFor(name));
+}
 
-    // Per-file content CRC (streamed - same fnv1a the transfer table uses).
-    std::vector<unsigned int> crcs(files.size(), 0);
-    std::vector<const char*>  paths(files.size(), (const char*)0);
-    std::vector<unsigned char> buf(65536);
-    for (size_t i = 0; i < files.size(); ++i) {
-        paths[i] = files[i].rel.c_str();
-        HANDLE h = CreateFileA(pathJoin(folder, files[i].rel).c_str(), GENERIC_READ,
-                               FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
-        if (h == INVALID_HANDLE_VALUE) return 0; // unreadable = unknown
-        unsigned int crc = fnv1aInit();
-        DWORD got = 0;
-        while (ReadFile(h, &buf[0], (DWORD)buf.size(), &got, 0) && got > 0)
-            crc = fnv1aUpdate(crc, &buf[0], (unsigned int)got);
-        CloseHandle(h);
-        crcs[i] = crc;
+void backupSaveFolder(const std::string& name) {
+    if (!saveNameSafe(name)) return;
+    const std::string dir = saveFolderFor(name);
+    if (GetFileAttributesA(dir.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+    const std::string backups = backupsRootFor(dir);
+    if (backups.empty()) return;
+    CreateDirectoryA(backups.c_str(), 0);
+    SYSTEMTIME st; GetLocalTime(&st);
+    char stamp[32];
+    _snprintf(stamp, sizeof(stamp) - 1, "%04u%02u%02u-%02u%02u%02u ",
+              st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    stamp[sizeof(stamp) - 1] = '\0';
+    const std::string dst = pathJoin(backups, std::string(stamp) + name);
+    // A copy, not a move: the game is about to save over this folder and finds
+    // it as it left it.
+    const bool ok = copyTree(dir, dst, 0);
+    char b[320];
+    _snprintf(b, sizeof(b) - 1, ok ? "[save] BACKUP of '%s' kept in '%s' (the friend saves over it)"
+                                   : "[save] BACKUP of '%s' FAILED ('%s')", name.c_str(), dst.c_str());
+    b[sizeof(b) - 1] = '\0';
+    if (ok) { coop::logLine(b); pruneBackups(backups); }
+    else    { coop::logErrLine(b); removeTree(dst, 0); }
+}
+
+bool saveNameSafe(const std::string& n) {
+    // The wire fields are 48 bytes with their NUL; a full one is a cut name.
+    if (n.empty() || n.size() > 46) return false;
+    for (size_t i = 0; i < n.size(); ++i) {
+        const unsigned char c = (unsigned char)n[i];
+        if (c < 0x20 || strchr("\\/:*?\"<>|", (int)c)) return false;
     }
-    return folderFingerprintOf(&paths[0], &crcs[0], (unsigned int)files.size());
+    if (n.find("..") != std::string::npos) return false;
+    const char last = n[n.size() - 1];
+    if (last == '.' || last == ' ') return false;
+    // Reserved device names (CON, NUL, COM1...), with or without an extension.
+    std::string base = n.substr(0, n.find('.'));
+    for (size_t i = 0; i < base.size(); ++i)
+        if (base[i] >= 'a' && base[i] <= 'z') base[i] = (char)(base[i] - 32);
+    static const char* const kDev[] = { "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
+    for (size_t i = 0; i < sizeof(kDev) / sizeof(kDev[0]); ++i)
+        if (base == kDev[i]) return false;
+    return true;
+}
+
+std::string incomingFolderFor(const std::string& name) {
+    const std::string finalDir = saveFolderFor(name);
+    const std::string side = besideSavesFor(finalDir, "TokelaCoop_incoming");
+    return side.empty() ? finalDir + "__incoming" : pathJoin(side, name);
 }
 
 void armWatch(const std::string& name) {
@@ -520,6 +640,8 @@ int tickWatch(unsigned int* outFiles, unsigned __int64* outBytes,
 #ifndef TOKELACOOP_PROTOTEST
 
 bool beginSend(NetLink& net, u32 localId, const std::string& name) {
+    // One transfer at a time: the friend drops the one still running.
+    if (g_sendActive) sendAbort(&net, localId, SEND_ABORT_CANCELLED, "superseded by a new transfer");
     sendCloseFile();
     g_sendFiles.clear();
     g_sendCrcs.clear();
@@ -592,11 +714,19 @@ bool tickSend(NetLink& net, u32 localId) {
         const XferFile& xf = g_sendFiles[g_sendFileIdx];
 
         if (g_sendHandle == INVALID_HANDLE_VALUE) {
+            // Shared for writing and deleting: the game must always be able to
+            // save over this folder while a long transfer reads it (we notice
+            // the change below and start again).
             g_sendHandle = CreateFileA(pathJoin(g_sendFolder, xf.rel).c_str(),
-                                       GENERIC_READ, FILE_SHARE_READ, 0,
+                                       GENERIC_READ,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0,
                                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
             if (g_sendHandle == INVALID_HANDLE_VALUE) {
-                sendAbort("open failed (save changed mid-transfer?)");
+                sendAbort(&net, localId, SEND_ABORT_CHANGED, "open failed (save changed mid-transfer?)");
+                return false;
+            }
+            if (!sameAsSnapshot(g_sendHandle, xf)) {
+                sendAbort(&net, localId, SEND_ABORT_CHANGED, "a file changed since the transfer began");
                 return false;
             }
             g_sendOffset = 0;
@@ -608,7 +738,7 @@ bool tickSend(NetLink& net, u32 localId) {
             want = (DWORD)(xf.size - g_sendOffset);
         DWORD got = 0;
         if (want > 0 && (!ReadFile(g_sendHandle, buf, want, &got, 0) || got != want)) {
-            sendAbort("read failed (save changed mid-transfer?)");
+            sendAbort(&net, localId, SEND_ABORT_CHANGED, "read failed (save changed mid-transfer?)");
             return false;
         }
         g_sendCurCrc = fnv1aUpdate(g_sendCurCrc, buf, (unsigned int)got);
@@ -626,6 +756,12 @@ bool tickSend(NetLink& net, u32 localId) {
         g_sendOffset    += got;
         g_sendSentBytes += got;
         if (g_sendOffset >= xf.size) {
+            // Rewritten while we read it (same size or not): the bytes sent are
+            // not one save. Start again from a settled folder.
+            if (!sameAsSnapshot(g_sendHandle, xf)) {
+                sendAbort(&net, localId, SEND_ABORT_CHANGED, "a file changed while it was sent");
+                return false;
+            }
             g_sendCrcs[g_sendFileIdx] = g_sendCurCrc;
             sendCloseFile();
             ++g_sendFileIdx;
@@ -674,18 +810,47 @@ u32  lastAckXferId() { return g_lastAckXferId; }
 int  lastAckOk()     { return g_lastAckOk; }
 
 #ifndef TOKELACOOP_PROTOTEST
-void abortAll() {
+void abortAll(NetLink& net, u32 localId) {
     if (g_watchArmed) {
         g_watchArmed = false;
         coop::logLine("[save] WATCH disarmed (superseded by coordinated load)");
     }
-    if (g_sendActive) sendAbort("superseded by coordinated load");
+    sendAbort(&net, localId, SEND_ABORT_CANCELLED, "superseded by coordinated load");
+}
+
+void abortSend(NetLink& net, u32 localId, const char* why) {
+    sendAbort(&net, localId, SEND_ABORT_CANCELLED, why);
+}
+
+std::string sendingName() { return g_sendActive ? g_sendName : std::string(); }
+
+int takeSendAbort(std::string* name) {
+    const int r = g_sendAbortReason;
+    if (name) *name = g_sendAbortName;
+    g_sendAbortReason = SEND_ABORT_NONE;
+    g_sendAbortName.clear();
+    return r;
 }
 #endif
 
 // ---- Receiver (join) -------------------------------------------------------------
 
+void abortReceive(const char* why) {
+    recvCloseFile();
+    const bool was = g_recvActive;
+    g_recvActive = false;
+    if (!g_recvStaging.empty()) removeTree(g_recvStaging, 0);
+    g_recvStaging.clear();
+    if (!was) return;
+    char b[192];
+    _snprintf(b, sizeof(b) - 1, "[save] XFER-RECV id=%u name='%s' dropped (%s)",
+              g_recvXferId, g_recvName.c_str(), why ? why : "");
+    b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+}
+
 void onSaveBegin(const SaveBeginPacket& b) {
+    // A transfer still staging is superseded: never leave its partial folder.
+    if (g_recvActive) abortReceive("superseded by a new transfer");
     recvCloseFile();
     char name[sizeof(b.name) + 1];
     memcpy(name, b.name, sizeof(b.name));
@@ -697,9 +862,23 @@ void onSaveBegin(const SaveBeginPacket& b) {
     g_recvTotalBytes = b.totalBytes;
     g_recvBytes      = 0;
     g_recvStartTick  = GetTickCount();
-    g_recvStaging    = saveFolderFor(g_recvName + "__incoming");
     g_recvCrcs.assign(b.fileCount, fnv1aInit());
     g_recvSeen.assign(b.fileCount, 0);
+    g_recvPaths.assign(b.fileCount, std::string());
+    // The name builds a path: one that is not a plain folder name (a '..', a
+    // drive, a separator, a device) never reaches the disk.
+    if (!saveNameSafe(g_recvName)) {
+        g_recvActive = false;
+        g_recvStaging.clear();
+        char lb[160];
+        _snprintf(lb, sizeof(lb) - 1, "[save] XFER-RECV id=%u REFUSED: unusable save name", b.xferId);
+        lb[sizeof(lb) - 1] = '\0'; coop::logErrLine(lb);
+        return;
+    }
+    // Staged outside the save folder, so Kenshi's load menu never lists a half
+    // received save. (Up to v0.56 it was save\<name>__incoming: drop a leftover.)
+    removeTree(saveFolderFor(g_recvName + "__incoming"), 0);
+    g_recvStaging    = incomingFolderFor(g_recvName);
 
     // A fresh staging folder: stale partials from an aborted transfer would
     // otherwise pollute the CRC verify.
@@ -741,6 +920,7 @@ void onSaveFile(const SaveFileHeader& h, const char* path, const unsigned char* 
         }
         g_recvOpenIdx = (int)h.fileIdx;
         g_recvSeen[h.fileIdx] = 1;
+        g_recvPaths[h.fileIdx] = rel;
     }
 
     LONG hi = 0;
@@ -760,11 +940,14 @@ int onSaveDone(const SaveDoneHeader& d, const u32* crcs,
                u16* outFiles, unsigned __int64* outBytes) {
     if (outFiles) *outFiles = 0;
     if (outBytes) *outBytes = 0;
-    if (!g_recvActive || d.xferId != g_recvXferId) return 0;
+    if (d.xferId != g_recvXferId) return 0;   // a stale transfer's DONE
+    // This transfer was refused or could not stage: still a finished (failed)
+    // transfer, so a join waiting for it reacts instead of waiting forever.
+    const bool staged = g_recvActive;
     recvCloseFile();
     g_recvActive = false;
 
-    bool ok = (d.fileCount == g_recvFileCount);
+    bool ok = staged && (d.fileCount == g_recvFileCount);
     unsigned int bad = 0;
     if (ok) {
         for (u16 i = 0; i < d.fileCount; ++i) {
@@ -777,6 +960,13 @@ int onSaveDone(const SaveDoneHeader& d, const u32* crcs,
         // save is only removed AFTER the new one is in place.
         std::string finalDir = saveFolderFor(g_recvName);
         std::string oldDir   = finalDir + "__old";
+        // An earlier commit cut short left the save only as <name>__old: it is
+        // the friend's save, so put it back rather than delete it.
+        if (GetFileAttributesA(finalDir.c_str()) == INVALID_FILE_ATTRIBUTES &&
+            GetFileAttributesA(oldDir.c_str()) != INVALID_FILE_ATTRIBUTES)
+            MoveFileExA(oldDir.c_str(), finalDir.c_str(), MOVEFILE_WRITE_THROUGH);
+        else if (GetFileAttributesA(oldDir.c_str()) != INVALID_FILE_ATTRIBUTES)
+            keepBackup(oldDir, g_recvName);   // a leftover beside a live save
         removeTree(oldDir, 0);
         bool hadOld = false;
         if (GetFileAttributesA(finalDir.c_str()) != INVALID_FILE_ATTRIBUTES) {
@@ -791,9 +981,15 @@ int onSaveDone(const SaveDoneHeader& d, const u32* crcs,
                                     MOVEFILE_WRITE_THROUGH); // restore
         }
         if (ok && hadOld) keepBackup(oldDir, g_recvName);
-        if (ok) noteReceived(finalDir, g_recvName);
+        if (ok) {
+            std::vector<const char*> paths(g_recvFileCount, (const char*)0);
+            for (u16 i = 0; i < g_recvFileCount; ++i) paths[i] = g_recvPaths[i].c_str();
+            noteReceived(finalDir, g_recvName,
+                         g_recvFileCount ? folderFingerprintOf(&paths[0], &g_recvCrcs[0], g_recvFileCount) : 0);
+        }
     }
-    if (!ok) removeTree(g_recvStaging, 0); // never leave a half-written loadable save
+    if (!ok && !g_recvStaging.empty()) removeTree(g_recvStaging, 0); // never leave a half-written save
+    g_recvStaging.clear();
 
     if (outFiles) *outFiles = ok ? g_recvFileCount : 0;
     if (outBytes) *outBytes = ok ? g_recvBytes : 0;

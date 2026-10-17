@@ -68,7 +68,9 @@ bool saveInfo(char* curGame, unsigned int curLen,
 
 // One local save edge captured by the SaveManager::save detour (menu save,
 // quicksave, autosave timer, or the mod's own saveGameAs).
-struct SaveEdge { char name[48]; int autosave; int suppressed; };
+// toolong: the real name does not fit the 48-byte edge/wire fields (name holds a
+// cut copy): co-op cannot stream, announce or load it under that name.
+struct SaveEdge { char name[48]; int autosave; int suppressed; int toolong; };
 // Detour SaveManager::save: every local save (any path) logs a "[save]
 // LOCAL-SAVE" line and queues a SaveEdge the Plugin drains once per tick -
 // the coordination trigger for the host-authoritative save transfer.
@@ -81,7 +83,7 @@ unsigned int drainSaveEdges(SaveEdge* out, unsigned int maxOut);
 // ---- Protocol 32: coordinated load ------------------------------------------
 // One local load edge captured by the SaveManager::load detour (in-game load
 // menu, title-screen load, or the mod's own loadSave).
-struct LoadEdge { char name[48]; int suppressed; };
+struct LoadEdge { char name[48]; int suppressed; int toolong; };
 // Detour SaveManager::load: every local load (any path) logs a "[load]
 // LOCAL-LOAD" line and queues a LoadEdge the Plugin drains once per tick -
 // the coordination trigger for the host-authoritative load broadcast.

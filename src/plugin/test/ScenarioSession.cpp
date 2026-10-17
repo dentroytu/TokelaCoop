@@ -733,7 +733,7 @@ public:
           saveOk_(false), ackSeen_(false), ackOk_(false), loadIssued_(false),
           loadOk_(false), sigWas2_(false), swapSeen_(false), swapDone_(false),
           censused_(false), siteSeen_(false), dropStartMs_(0), sigClearedMs_(0),
-          censusAtMs_(0), lastStatusMs_(0) {
+          censusAtMs_(0), lastStatusMs_(0), ackBase_(0) {
         memset(ownHand_, 0, sizeof(ownHand_));
         ownSid_[0] = '\0';
     }
@@ -768,6 +768,9 @@ public:
             }
             if (placed_ && !saveIssued_ && ctx.elapsedMs >= SAVE_AT_MS) {
                 saveIssued_ = true;
+                // An earlier transfer's ACK (the connect push, when it had to
+                // stream - load_stream) is not this save's.
+                ackBase_ = savexfer::lastAckXferId();
                 saveOk_ = engine::saveGameAs(SAVE_NAME);
                 char b[128];
                 _snprintf(b, sizeof(b) - 1,
@@ -778,7 +781,8 @@ public:
             // The join's commit acknowledgement = it holds a byte-identical
             // copy, so the coordinated load's fingerprint check will MATCH
             // (the transfer-fallback leg is load-tested by divergence runs).
-            if (saveIssued_ && !ackSeen_ && savexfer::lastAckXferId() != 0) {
+            if (saveIssued_ && !ackSeen_ && savexfer::lastAckXferId() != 0 &&
+                savexfer::lastAckXferId() != ackBase_) {
                 ackSeen_ = true;
                 ackOk_ = (savexfer::lastAckOk() == 1);
                 char b[112];
@@ -908,6 +912,7 @@ private:
     bool          ackSeen_, ackOk_, loadIssued_, loadOk_;
     bool          sigWas2_, swapSeen_, swapDone_, censused_, siteSeen_;
     unsigned long dropStartMs_, sigClearedMs_, censusAtMs_, lastStatusMs_;
+    unsigned int  ackBase_;
     unsigned int  ownHand_[5];
     char          ownSid_[48];
 
@@ -1276,6 +1281,121 @@ private:
     static const char* const SAVE_NAME;
 };
 const char* const DismissSyncScenario::SAVE_NAME = "coopresume";
+
+// join_saveload (v0.57, full tier): the FRIEND presses save, then load - the
+// path a real friend takes and no scenario drove before. The join's save is
+// suppressed locally and forwarded (PKT_SAVE_REQ): the host saves, streams the
+// folder and the join commits it. The join then loads that save: suppressed too
+// and forwarded (PKT_LOAD_REQ): the host loads and the GO drags the join along.
+// Both must end in the reloaded world. The oracle checks every edge in both logs.
+class JoinSaveLoadScenario : public TimedScenario {
+public:
+    JoinSaveLoadScenario()
+        : TimedScenario("join_saveload", 0), saveIssued_(false), saveOk_(false),
+          commitSeen_(false), commitOk_(false), loadIssued_(false), loadOk_(false),
+          sigWas2_(false), swapDone_(false), commitBase_(0), commitAtMs_(0),
+          reportedAtMs_(0), dropStartMs_(0), sigClearedMs_(0), lastStatusMs_(0) {}
+
+    virtual void onStart(const ScenarioContext& ctx) {
+        commitBase_ = savexfer::commitSeq();
+        char b[80];
+        _snprintf(b, sizeof(b) - 1, "SCENARIO JSL start host=%d", ctx.isHost ? 1 : 0);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+
+    virtual bool onTick(const ScenarioContext& ctx) {
+        const bool live = engine::gameplayLive(ctx.gw);
+        if (!ctx.isHost) {
+            // The friend's save press (suppressed here, done by the host).
+            if (!saveIssued_ && live && ctx.elapsedMs >= SAVE_AT_MS) {
+                saveIssued_ = true;
+                saveOk_ = engine::saveGameAs(SAVE_NAME);
+                logStep("save-press", saveOk_, ctx.elapsedMs);
+            }
+            // The host's copy of it landed here.
+            if (saveIssued_ && !commitSeen_ && savexfer::commitSeq() != commitBase_) {
+                commitBase_ = savexfer::commitSeq();
+                if (_stricmp(savexfer::lastCommitName().c_str(), SAVE_NAME) == 0) {
+                    commitSeen_ = true;
+                    commitOk_ = (savexfer::lastCommitResult() == 1);
+                    commitAtMs_ = ctx.elapsedMs;
+                    logStep("commit", commitOk_, ctx.elapsedMs);
+                }
+            }
+            // The friend's load press, once the save is on its disk.
+            if (commitSeen_ && commitOk_ && !loadIssued_ && live &&
+                ctx.elapsedMs >= commitAtMs_ + LOAD_AFTER_MS) {
+                loadIssued_ = true;
+                loadOk_ = engine::loadSave(SAVE_NAME);
+                logStep("load-press", loadOk_, ctx.elapsedMs);
+            }
+        }
+        // Both: the world swap - as squad_persist.
+        if (!live && dropStartMs_ == 0) dropStartMs_ = ctx.elapsedMs;
+        else if (live && dropStartMs_ != 0) {
+            const unsigned long ms = ctx.elapsedMs - dropStartMs_;
+            dropStartMs_ = 0;
+            if (ms >= SWAP_MIN_MS && !swapDone_) markSwap(ctx.elapsedMs);
+        }
+        {
+            const int sig = engine::saveMgrSignal(0);
+            if (sig == 2) { sigWas2_ = true; sigClearedMs_ = 0; }
+            else if (sigWas2_ && sigClearedMs_ == 0) sigClearedMs_ = ctx.elapsedMs;
+            if (!swapDone_ && sigWas2_ && sigClearedMs_ != 0 && live && dropStartMs_ == 0 &&
+                ctx.elapsedMs >= sigClearedMs_ + SYNC_CONFIRM_MS)
+                markSwap(ctx.elapsedMs);
+        }
+        if (ctx.elapsedMs - lastStatusMs_ >= 5000) {
+            lastStatusMs_ = ctx.elapsedMs;
+            char b[160];
+            _snprintf(b, sizeof(b) - 1,
+                      "SCENARIO JSL state save=%d commit=%d load=%d swapDone=%d live=%d t=%lu",
+                      saveOk_ ? 1 : 0, commitOk_ ? 1 : 0, loadOk_ ? 1 : 0,
+                      swapDone_ ? 1 : 0, live ? 1 : 0, ctx.elapsedMs);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+        }
+        if ((swapDone_ && live && ctx.elapsedMs >= reportedAtMs_) || ctx.elapsedMs >= DURATION_MS) {
+            const bool legs = ctx.isHost ? swapDone_
+                                         : (saveOk_ && commitOk_ && loadOk_ && swapDone_);
+            char b[128];
+            _snprintf(b, sizeof(b) - 1, "SCENARIO JSL verdict role=%s legs=%d t=%lu",
+                      ctx.isHost ? "host" : "join", legs ? 1 : 0, ctx.elapsedMs);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            passed_ = legs;   // the request/transfer edges are the oracle's call
+            return true;
+        }
+        return false;
+    }
+
+private:
+    static const unsigned long SAVE_AT_MS      = 10000;
+    static const unsigned long LOAD_AFTER_MS   = 3000;
+    static const unsigned long SWAP_MIN_MS     = 400;
+    static const unsigned long SYNC_CONFIRM_MS = 3000;
+    static const unsigned long REPORT_HOLD_MS  = 10000;
+    static const unsigned long DURATION_MS     = 110000;
+
+    void markSwap(unsigned long t) {
+        swapDone_ = true;
+        reportedAtMs_ = t + REPORT_HOLD_MS;
+        char b[96];
+        _snprintf(b, sizeof(b) - 1, "SCENARIO JSL reloaded t=%lu", t);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+    static void logStep(const char* what, bool ok, unsigned long t) {
+        char b[112];
+        _snprintf(b, sizeof(b) - 1, "SCENARIO JSL %s name='%s' ok=%d t=%lu", what, SAVE_NAME, ok ? 1 : 0, t);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+
+    bool          saveIssued_, saveOk_, commitSeen_, commitOk_, loadIssued_, loadOk_;
+    bool          sigWas2_, swapDone_;
+    u32           commitBase_;
+    unsigned long commitAtMs_, reportedAtMs_, dropStartMs_, sigClearedMs_, lastStatusMs_;
+
+    static const char* const SAVE_NAME;
+};
+const char* const JoinSaveLoadScenario::SAVE_NAME = "coopresume";
 
 // save_sync (protocol 31 phase 12c, full tier; saveSync ON) / save_stage1
 // (the resume_test.ps1 stage-1 variant: a building is placed FIRST so the
@@ -1711,10 +1831,12 @@ Scenario* makeSessionScenario(const std::string& name) {
     if (name == "resume_check")   return new ResumeCheckScenario();
     if (name == "load_probe")     return new LoadProbeScenario();
     if (name == "load_sync")      return new LoadSyncScenario();
+    if (name == "load_stream")    return new LoadSyncScenario();   // load_sync + FORCE_STREAM (join)
     if (name == "squad_persist")     return new SquadPersistScenario("squad_persist");
     if (name == "squad_persist_off") return new SquadPersistScenario("squad_persist_off");
     if (name == "dismiss_sync")      return new DismissSyncScenario("dismiss_sync");
     if (name == "dismiss_sync_off")  return new DismissSyncScenario("dismiss_sync_off");
+    if (name == "join_saveload")     return new JoinSaveLoadScenario();
     if (name == "money_persist")  return new MoneyPersistScenario();
     return 0;
 }

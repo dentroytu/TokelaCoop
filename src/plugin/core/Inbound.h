@@ -290,6 +290,7 @@ struct InboundSaveReq {
 // about to stream fileCount files / totalBytes; the join wipes + creates its
 // staging folder.
 struct InboundSaveBegin {
+    u32             seq;     // arrival order across the three save-transfer queues
     u32             ownerId;
     SaveBeginPacket pkt;
 };
@@ -298,6 +299,7 @@ struct InboundSaveBegin {
 // save-relative path + up to SAVE_CHUNK_MAX payload bytes. Ordered-reliable
 // delivery means chunks arrive exactly as the sender paced them.
 struct InboundSaveFile {
+    u32             seq;     // arrival order (see drainSaveXfer)
     u32             ownerId;
     SaveFileHeader  hdr;
     std::string     path; // hdr.pathLen bytes, save-folder-relative
@@ -307,6 +309,7 @@ struct InboundSaveFile {
 // One received save-transfer CRC table (protocol 31, join side): verify the
 // staged files and commit (or discard).
 struct InboundSaveDone {
+    u32              seq;    // arrival order (see drainSaveXfer)
     u32              ownerId;
     SaveDoneHeader   hdr;
     std::vector<u32> crcs;
@@ -453,6 +456,7 @@ public:
         spawnReq_(worldReset_),   spawnInfo_(worldReset_),  camHint_(worldReset_, 64),
         cellClaim_(worldReset_, 64) {
         InitializeCriticalSection(&cs_);
+        saveSeq_ = 0;
     }
     ~Inbound() { DeleteCriticalSection(&cs_); }
 
@@ -669,7 +673,7 @@ public:
     }
     void pushSaveBegin(u32 ownerId, const SaveBeginPacket& pkt) {
         InboundSaveBegin sb; sb.ownerId = ownerId; sb.pkt = pkt;
-        EnterCriticalSection(&cs_); saveBegin_.push_back(sb); LeaveCriticalSection(&cs_);
+        EnterCriticalSection(&cs_); sb.seq = ++saveSeq_; saveBegin_.push_back(sb); LeaveCriticalSection(&cs_);
     }
     void pushSaveFile(u32 ownerId, const SaveFileHeader& hdr,
                       const char* path, const u8* data) {
@@ -678,14 +682,14 @@ public:
         sf.hdr     = hdr;
         sf.path.assign(path, path + hdr.pathLen);
         if (data && hdr.dataLen > 0) sf.data.assign(data, data + hdr.dataLen);
-        EnterCriticalSection(&cs_); saveFile_.push_back(sf); LeaveCriticalSection(&cs_);
+        EnterCriticalSection(&cs_); sf.seq = ++saveSeq_; saveFile_.push_back(sf); LeaveCriticalSection(&cs_);
     }
     void pushSaveDone(u32 ownerId, const SaveDoneHeader& hdr, const u32* crcs) {
         InboundSaveDone sd;
         sd.ownerId = ownerId;
         sd.hdr     = hdr;
         if (crcs && hdr.fileCount > 0) sd.crcs.assign(crcs, crcs + hdr.fileCount);
-        EnterCriticalSection(&cs_); saveDone_.push_back(sd); LeaveCriticalSection(&cs_);
+        EnterCriticalSection(&cs_); sd.seq = ++saveSeq_; saveDone_.push_back(sd); LeaveCriticalSection(&cs_);
     }
     void pushSaveAck(u32 ownerId, const SaveAckPacket& pkt) {
         InboundSaveAck sa; sa.ownerId = ownerId; sa.pkt = pkt;
@@ -832,6 +836,16 @@ public:
     void drainSaveDones(std::deque<InboundSaveDone>& out) {
         EnterCriticalSection(&cs_); out.swap(saveDone_); LeaveCriticalSection(&cs_);
     }
+    // The three save-transfer queues under ONE lock: what comes out is exactly
+    // everything that had arrived, so merged by seq it replays the wire order. Drained
+    // one by one, a DONE pushed between two drains was verified before the last
+    // chunks ahead of it (badCrc on a good transfer, 1 in 36 on loopback).
+    void drainSaveXfer(std::deque<InboundSaveBegin>& begins, std::deque<InboundSaveFile>& files,
+                       std::deque<InboundSaveDone>& dones) {
+        EnterCriticalSection(&cs_);
+        begins.swap(saveBegin_); files.swap(saveFile_); dones.swap(saveDone_);
+        LeaveCriticalSection(&cs_);
+    }
     void drainSaveAcks(std::deque<InboundSaveAck>& out) {
         EnterCriticalSection(&cs_); out.swap(saveAck_); LeaveCriticalSection(&cs_);
     }
@@ -932,6 +946,7 @@ private:
     SessionQ<InboundSaveBegin>     saveBegin_;
     SessionQ<InboundSaveFile>      saveFile_;
     SessionQ<InboundSaveDone>      saveDone_;
+    u32                            saveSeq_;   // under cs_: the save-transfer arrival counter
     SessionQ<InboundSaveAck>       saveAck_;
     SessionQ<InboundLoadGo>        loadGo_;
     SessionQ<InboundLoadReq>       loadReq_;

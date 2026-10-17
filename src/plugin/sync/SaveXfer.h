@@ -5,7 +5,7 @@
 // channels), waits for the folder to QUIESCE (Kenshi's save is deferred +
 // multi-file: quick.save + platoon/*.platoon + zone/*.zone + portraits), then
 // streams the whole save folder to the join over CH_RELIABLE in ~4 KB chunks.
-// The join stages into save/<name>__incoming/, verifies per-file hashes on
+// The join stages into <saves>\..\TokelaCoop_incoming\<name>, verifies per-file hashes on
 // DONE, commits (replace save/<name>/), and ACKs. Resume = both clients load
 // the identical file, which re-runs the shared-save-lineage guarantee all the
 // hand-keyed replication rests on (no sidecar; session-placed buildings and
@@ -54,6 +54,18 @@ bool folderInventory(const std::string& folder, unsigned int* outFiles,
 // only, never per tick).
 u32 folderFingerprint(const std::string& name);
 
+// A save name that is a plain folder name: no separator, drive, '..', control
+// character, trailing dot/space or device name, and short enough not to be a cut
+// one (the wire and edge fields are 48 bytes). Every name that builds a path from
+// the network or a detour edge goes through this.
+bool saveNameSafe(const std::string& name);
+// Where a received save is staged: <saves>\..\TokelaCoop_incoming\<name> (same
+// volume, so the commit is a rename; outside the folder Kenshi lists).
+std::string incomingFolderFor(const std::string& name);
+// HOST: copy save 'name' into the backups before a save the friend asked for
+// replaces it (only called when it is not the game being played).
+void backupSaveFolder(const std::string& name);
+
 // ---- Save-completion detection (folder quiescence) ---------------------------
 // SaveManager::save is DEFERRED (it sets a signal; execute() writes the files
 // over the following seconds), so the only robust completion edge is the save
@@ -97,13 +109,18 @@ unsigned __int64 sendTotalBytes();
 bool tickSend(NetLink& net, u32 localId);
 
 // ---- Receiver (join): staged, CRC-verified, atomically-committed ------------
-// Chunks arrive in order (CH_RELIABLE): BEGIN wipes + creates
-// save/<name>__incoming/, FILE chunks append into it (incremental FNV-1a-32
-// per file), DONE verifies the CRC table and commits: the existing
-// save/<name>/ is swapped out and the staging folder renamed over it. A
-// failed verify discards staging and leaves the previous save untouched.
+// Chunks arrive in order (CH_RELIABLE): BEGIN wipes + creates the staging folder
+// (incomingFolderFor), FILE chunks append into it (incremental FNV-1a-32 per
+// file), DONE verifies the CRC table and commits: the existing save/<name>/ is
+// swapped out (kept as a backup unless it is exactly an earlier receipt) and the
+// staging folder renamed over it. A failed verify discards staging and leaves the
+// previous save untouched. A BEGIN with an unusable name is refused (its DONE
+// then fails), and a new BEGIN supersedes one still staging.
 
 void onSaveBegin(const SaveBeginPacket& b);
+// Drop a transfer still staging (the friend left, the session was reset): close
+// its file and delete the staging folder. No-op when nothing is staging.
+void abortReceive(const char* why);
 // path (not '\0'-terminated, pathLen bytes) + data are the wire payload.
 void onSaveFile(const SaveFileHeader& h, const char* path, const unsigned char* data);
 // Returns 1 = verified + committed, 0 = failed (staging discarded). Fills the
@@ -141,9 +158,20 @@ u32  lastAckXferId();
 int  lastAckOk();
 
 // Protocol 32: a coordinated LOAD supersedes any in-flight save coordination -
-// disarm the quiescence watch and abort an active send (the join drops the
-// orphaned chunks by xferId; the reloaded world's saves restart cleanly).
-void abortAll();
+// disarm the quiescence watch and abort an active send (the join is told with an
+// empty DONE and drops the staging; the reloaded world's saves restart cleanly).
+void abortAll(NetLink& net, u32 localId);
+
+// Why the last send stopped short (until taken): CHANGED = a file of the save was
+// rewritten or vanished under the transfer (worth a retry from a settled folder),
+// CANCELLED = superseded or stopped on purpose. Every abort tells the join (an
+// empty DONE: its verify fails, it drops the staging and stops waiting).
+enum { SEND_ABORT_NONE = 0, SEND_ABORT_CHANGED = 1, SEND_ABORT_CANCELLED = 2 };
+int takeSendAbort(std::string* name);
+// Stop the active send (the friend left, the same save is being written again).
+void abortSend(NetLink& net, u32 localId, const char* why);
+// Name of the save being sent ("" when idle).
+std::string sendingName();
 
 } // namespace savexfer
 } // namespace coop

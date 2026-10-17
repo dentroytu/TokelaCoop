@@ -14,8 +14,12 @@ TokelaCoop no se activa y avisa.
 > **Estado (2026-10-17):**
 > - Compilación verificada en CI (`windows-2022`): `prototest`, `tunneltest`, DLL Harness y Release, y kit con instalador.
 >   Releases publicadas: `v0.52` y `v0.53` (con el nombre KenshiCoop), `v0.54` (TokelaCoop, 2026-10-10, protocolo 57),
->   `v0.55` (2026-10-17, protocolo 58) y `v0.56` (2026-10-17, protocolo 59: despedir personajes).
+>   `v0.55` (2026-10-17, protocolo 58), `v0.56` (2026-10-17, protocolo 59: despedir personajes) y `v0.57`
+>   (2026-10-17, mismo protocolo 59: revisión de guardar y cargar).
 > - **Verificado en el juego** (PC del autor del fork, Kenshi de Steam con RE_Kenshi):
+>   - v0.57 (2026-10-17): el amigo guarda y carga (`join_saveload`), la copia llega con el amigo en partida y la
+>     replicación en pausa (`load_stream`), el envío real al conectar (`stream_test.ps1`, 37 archivos, badCrc=0), y
+>     `save_sync`, `load_sync`, `money_persist`, `squad_persist`, `dismiss_sync`, `latejoin_sync`, `coop_presence`;
 >   - v0.56 (2026-10-17): despedir por la pantalla de escuadras real (la prueba abre la pestaña 4) se refleja en el
 >     otro juego y no vuelve al guardar y cargar (`dismiss_sync`; `dismiss_sync_off` reproduce el fallo antiguo), y
 >     despedir a un personaje del amigo se rechaza. Regresión de 26 pruebas (básicas + escuadras, guardar/cargar,
@@ -69,7 +73,7 @@ TokelaCoop no se activa y avisa.
 
 Flujo de trabajo:
 - una rama por cambio, PR y fusión cuando el CI está en verde;
-- las releases se publican con una etiqueta `vX.YY` (última: `v0.56`), que tiene que coincidir con
+- las releases se publican con una etiqueta `vX.YY` (última: `v0.57`), que tiene que coincidir con
   `TOKELACOOP_VERSION` de `src/netproto/Version.h` (el CI rechaza la etiqueta si no);
 - el dueño prefiere español y una UX muy sencilla.
 
@@ -236,6 +240,27 @@ powershell -ExecutionPolicy Bypass -File scripts\regress.ps1 -Tier full -SkipBui
 - **Sync/replicación** (`src/plugin/sync/`): `Replicator*` (authority, spawn, items, channels, publish, drive),
   interpolación (`Interp`), `ChangeGate`, transferencia de saves (`SaveXfer`).
   Las entidades se identifican con `hand`, que es estable entre saves y entre máquinas.
+- **Guardar y cargar** (`Plugin.cpp` `driveSaveSync`/`driveLoadSync`, `sync/SaveXfer.cpp`; revisado en la v0.57):
+  - el host guarda y envía la carpeta entera; el amigo no guarda nunca (sus guardados viajan como `PKT_SAVE_REQ`,
+    sus cargas como `PKT_LOAD_REQ`). Los autoguardados del host no se envían;
+  - el amigo recibe en `<kenshi>\TokelaCoop_incoming\<nombre>` (fuera de `save\`, para que Kenshi no liste una
+    partida a medias), verifica y la cambia por la suya; la anterior va a `TokelaCoop_backups` salvo que sea
+    idéntica (por huella) a una recibida (3 por partida, 9 en total);
+  - las tres colas de la transferencia se vacían juntas y se procesan en orden de llegada (`drainSaveXfer`):
+    antes un DONE podía verificarse antes que sus últimos trozos (`badCrc` con datos buenos);
+  - reintentos: un guardado que llega mal o cambia durante el envío se reenvía una vez; la copia para cargar la
+    vuelve a pedir el amigo (hasta 3 veces; después desconecta con aviso), y mientras espera esa copia en partida
+    no se replica (`awaitingCopy`);
+  - el amigo reinicia sus contadores de carga en cada sesión (`resetSaveLoadHandoff`): un host reiniciado vuelve
+    a contar desde 1;
+  - el gestor de guardado de Kenshi hace un guardado o una carga a la vez: el host aplaza los guardados y cargas que
+    pide el amigo, el envío al conectar y la copia para cargar hasta que no haya otro en curso (`saveMgrSignal`,
+    `g_swapStartTick`, `g_loadPumpArmTick`); un guardado y una carga en el mismo tick perdían la carga;
+  - el emisor abre los archivos compartidos (el juego puede guardar encima) y aborta si cambian durante el envío,
+    avisando al amigo con un DONE vacío;
+  - nombres: `saveNameSafe` (46 bytes como mucho, sin rutas ni dispositivos); un nombre demasiado largo se avisa
+    en el banner (`showNotice`), igual que "guardando...", "partida guardada" y "no se pudo guardar";
+  - prueba `join_saveload`: el amigo guarda y luego carga.
 - **Autoridad:** el host es autoritativo del mundo (NPCs, facciones, tiempo, dinero, edificios);
   cada cliente lo es de **su propio squad**. Las acciones sobre cosas que no posees viajan como
   *intents* (p. ej. `PKT_INV_XFER`) al dueño.

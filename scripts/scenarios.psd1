@@ -1479,6 +1479,20 @@
             Advisory = @('smoothness', 'anim_truth', 'march', 'clock_sync')
             Tier = 'full'; WanVariant = $false
         }
+        # load_stream (v0.57): load_sync with the join NACKing every GO
+        # (TOKELACOOP_FORCE_STREAM=1 - read only by the join), so the host's copy
+        # streams in while the join is IN GAME. Gate: replication held while it
+        # waits, the copy committed and loaded, replication back on, and the
+        # load_sync same-hand checks after the reload.
+        load_stream = @{
+            DiagEnv = @{ TOKELACOOP_FORCE_STREAM = '1' }
+            Save = 'sync'; Setup = ''; Tolerance = 6.0
+            Seconds = 200; KillGraceSec = 170
+            PrimaryGate = 'load_stream'
+            Gating   = @('load_stream')
+            Advisory = @('smoothness', 'anim_truth', 'march', 'clock_sync')
+            Tier = 'full'; WanVariant = $false
+        }
 
         # money_persist: the regression gate for the bug protocol 52 fixes - cats
         # the JOIN moved used to be erased by the next load, because only the
@@ -1495,6 +1509,19 @@
             Save = 'sync'; Setup = ''; Tolerance = 6.0
             PrimaryGate = 'money_persist'
             Gating   = @('money_persist')
+            Advisory = @('smoothness', 'anim_truth', 'march', 'clock_sync')
+            Tier = 'full'; WanVariant = $false
+        }
+        # join_saveload (v0.57): the FRIEND presses save, then load. Both are
+        # suppressed on the join and forwarded: the host saves 'coopresume' and
+        # streams it (the join commits it), then loads it and the GO drags the
+        # join along. Gate: every request/transfer/load edge in both logs, and
+        # both scenarios end in the reloaded world.
+        join_saveload = @{
+            Save = 'sync'; Setup = ''; Tolerance = 6.0
+            Seconds = 180; KillGraceSec = 150
+            PrimaryGate = 'join_saveload'
+            Gating   = @('join_saveload')
             Advisory = @('smoothness', 'anim_truth', 'march', 'clock_sync')
             Tier = 'full'; WanVariant = $false
         }
