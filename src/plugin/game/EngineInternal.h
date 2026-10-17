@@ -337,8 +337,8 @@ typedef CombatClass* (__fastcall* GetCombatClassFn)(Character* self);
 // ---- Hook edge-queue records (defined here; the queue mechanics are
 // ---- documented at the hook bodies in EngineInternal.cpp) ---------------------------
 
-struct SaveEdgeRec { char name[48]; int autosave; int suppressed; };
-struct LoadEdgeRec { char name[48]; int suppressed; };
+struct SaveEdgeRec { char name[48]; int autosave; int suppressed; int toolong; };
+struct LoadEdgeRec { char name[48]; int suppressed; int toolong; };
 struct RecruitEdgeRec { unsigned int before[5]; unsigned int after[5]; };
 struct SquadHandRec { unsigned int h[5]; };
 struct BuildEdgeRec {

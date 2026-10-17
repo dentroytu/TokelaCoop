@@ -2,7 +2,7 @@
 # CoopOracles.psm1, 2026-07-12): latejoin (Get-LatejoinCensus/Mutations/
 # HealLatency, Test-LatejoinProbe/Sync), save/load (Test-SaveProbe,
 # Test-LoadProbe, Test-SaveSync, Test-SaveResume, Test-LoadSync,
-# Test-MoneyPersist).
+# Test-MoneyPersist, Test-JoinSaveLoad).
 # Dot-sourced by CoopOracles.psm1 (module scope).
 # Must NOT: change gate names or the LJ*/SAVE/LOAD marker regexes -
 # they are the C++ log contract (resources/CODE_MAP.md).
@@ -643,8 +643,12 @@ function Test-SaveResume {
 #      makes all hand-keyed replication valid after a coordinated load).
 # FINDINGs: swap evidence per side (WORLD-RELOAD vs synchronous), the join's
 # suppression lever state, and any NACK/transfer leg that fired.
+# -Stream (load_stream, v0.57: TOKELACOOP_FORCE_STREAM=1 on the join): the join
+# NACKs every GO, so step 2 instead requires the copy to come in while the join
+# is IN GAME - replication paused while it waits, the transfer committed, the
+# join loaded it, and replication back on.
 function Test-LoadSync {
-    param([string]$HostFile, [string]$JoinFile)
+    param([string]$HostFile, [string]$JoinFile, [switch]$Stream, [string]$GateName = "load_sync")
     $why = @()
 
     # Pre-req: the host's build + coordinated save legs.
@@ -662,7 +666,18 @@ function Test-LoadSync {
 
     # 2. the join received it, its copy fingerprint-MATCHed, and it loaded.
     $joinGo = Select-String -Path $JoinFile -Pattern "\[load\] GO id=(\d+) name='coopresume' fp=([0-9a-f]+) MATCH -> loading" -ErrorAction SilentlyContinue | Select-Object -Last 1
-    if ($null -eq $joinGo) {
+    if ($Stream) {
+        # 2'. forced copy: NACK, replication held while in game, commit, load.
+        $nack = Select-String -Path $JoinFile -Pattern "\[load\] GO id=\d+ name='coopresume' hostFp=[0-9a-f]+ localFp=[0-9a-f]+ \w+ -> NACK" -ErrorAction SilentlyContinue | Select-Object -Last 1
+        if ($null -eq $nack) { $why += "join never NACKed the GO (FORCE_STREAM not armed?)" }
+        $paused = Select-String -Path $JoinFile -Pattern "\[load\] waiting for the host's copy: replication paused" -ErrorAction SilentlyContinue | Select-Object -Last 1
+        if ($null -eq $paused) { $why += "join kept replicating while it waited for the copy in game" }
+        $late = Select-String -Path $JoinFile -Pattern "\[load\] transfer committed -> loading 'coopresume'" -ErrorAction SilentlyContinue | Select-Object -Last 1
+        if ($null -eq $late) { $why += "join never loaded the copy it waited for" }
+        $resumed = Select-String -Path $JoinFile -Pattern "\[load\] host's copy wait over: replication resumes" -ErrorAction SilentlyContinue | Select-Object -Last 1
+        if ($null -eq $resumed) { $why += "join never resumed replication after the copy" }
+        if ($nack -and $paused -and $late) { Write-Host "    FINDING: the copy came in while the join was in game; replication was held meanwhile" }
+    } elseif ($null -eq $joinGo) {
         $nack = Select-String -Path $JoinFile -Pattern "\[load\] GO id=\d+ name='coopresume' hostFp=([0-9a-f]+) localFp=([0-9a-f]+) (\w+) -> NACK" -ErrorAction SilentlyContinue | Select-Object -Last 1
         if ($null -ne $nack) {
             $g = $nack.Matches[0].Groups
@@ -743,7 +758,7 @@ function Test-LoadSync {
     $v = if ($why.Count -eq 0) { "PASS" } else { "FAIL" }
     $detail = $why -join "; "
     Write-Host "  LOAD-SYNC $v - hostSites=$($hSites.Count) joinSites=$($jSites.Count) sameHand=$shared $detail"
-    return (Add-GateResult -Name "load_sync" -Status $v `
+    return (Add-GateResult -Name $GateName -Status $v `
                 -Metrics @{ hostSites = $hSites.Count; joinSites = $jSites.Count; sameHand = $shared } -Detail $detail)
 }
 
@@ -817,3 +832,46 @@ function Test-MoneyPersist {
                 -Metrics @{ expect = $expect; hostPost = $hostPost; joinPost = $joinPost } -Detail $detail)
 }
 
+
+# join_saveload (v0.57): the FRIEND presses save, then load - every edge of the
+# two forwarded requests, in order, after the scenario started:
+#   save: join LOCAL-SAVE suppressed=1 -> join REQ->host -> host REQ from join ->
+#         host XFER-SENT -> join XFER-COMMIT badCrc=0 -> host XFER-ACK ok=1;
+#   load: join LOCAL-LOAD suppressed=1 -> join REQ->host -> host REQ from join ->
+#         host GO->join -> join loads it (MATCH, or after a transfer);
+#   both: the scenario saw the reload (legs=1).
+function Test-JoinSaveLoad {
+    param([string]$HostFile, [string]$JoinFile)
+    $why = @()
+    $after = {
+        param($f, $rx)
+        $start = Select-String -Path $f -Pattern "SCENARIO JSL start" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $start) { return $null }
+        return (Select-String -Path $f -Pattern $rx -ErrorAction SilentlyContinue |
+                Where-Object { $_.LineNumber -gt $start.LineNumber } | Select-Object -First 1)
+    }
+    $n = "coopresume"
+    $steps = @(
+        @('join', $JoinFile, "\[save\] LOCAL-SAVE name='$n' autosave=0 suppressed=1", "the friend's save was not suppressed locally"),
+        @('join', $JoinFile, "\[save\] REQ->host id=\d+ name='$n'", "the friend's save was not forwarded"),
+        @('host', $HostFile, "\[save\] REQ from join id=\d+ name='$n' -> saving", "the host never saved for the friend"),
+        @('host', $HostFile, "\[save\] XFER-SENT id=\d+", "the host never sent the save"),
+        @('join', $JoinFile, "\[save\] XFER-COMMIT id=\d+ name='$n' files=\d+ bytes=\d+ badCrc=0", "the friend never committed the save"),
+        @('host', $HostFile, "\[save\] XFER-ACK id=\d+ ok=1", "the host never got a good ACK"),
+        @('join', $JoinFile, "\[load\] LOCAL-LOAD name='$n' suppressed=1", "the friend's load was not suppressed locally"),
+        @('join', $JoinFile, "\[load\] REQ->host id=\d+ name='$n'", "the friend's load was not forwarded"),
+        @('host', $HostFile, "\[load\] REQ from join id=\d+ name='$n' -> loading", "the host never loaded for the friend"),
+        @('host', $HostFile, "\[load\] GO->join id=\d+ name='$n'", "the host never told the friend to load"),
+        @('join', $JoinFile, "\[load\] (GO id=\d+ name='$n' fp=[0-9a-f]+ MATCH -> loading|transfer committed -> loading '$n')", "the friend never loaded the save")
+    )
+    foreach ($s in $steps) {
+        if (-not (& $after $s[1] $s[2])) { $why += "$($s[0]): $($s[3])" }
+    }
+    foreach ($pair in @(@('host', $HostFile), @('join', $JoinFile))) {
+        $v = Select-String -Path $pair[1] -Pattern "SCENARIO JSL verdict role=$($pair[0]) legs=(\d)" -ErrorAction SilentlyContinue | Select-Object -Last 1
+        if (-not $v -or $v.Matches[0].Groups[1].Value -ne '1') { $why += "$($pair[0]): did not end in the reloaded world" }
+    }
+    $ok = ($why.Count -eq 0)
+    Write-Host ("  JOIN-SAVELOAD " + $(if ($ok) { "PASS - the friend's save and load both went through the host" } else { "FAIL - " + ($why -join '; ') }))
+    return (Add-GateResult -Name "join_saveload" -Status $(if ($ok) { "PASS" } else { "FAIL" }) -Detail ($why -join '; '))
+}

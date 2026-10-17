@@ -157,7 +157,9 @@ function Invoke-OneOracle {
         "save_sync"      { return (Test-SaveSync       -HostFile $HostLog -JoinFile $JoinLog) }
         "save_resume"    { return (Test-SaveResume     -HostFile $HostLog -JoinFile $JoinLog) }
         "load_sync"      { return (Test-LoadSync       -HostFile $HostLog -JoinFile $JoinLog) }
+        "load_stream"    { return (Test-LoadSync       -HostFile $HostLog -JoinFile $JoinLog -Stream -GateName "load_stream") }
         "money_persist"  { return (Test-MoneyPersist   -HostFile $HostLog -JoinFile $JoinLog) }
+        "join_saveload"  { return (Test-JoinSaveLoad   -HostFile $HostLog -JoinFile $JoinLog) }
         "connect_bootstrap" { return (Test-ConnectBootstrap -HostFile $HostLog -JoinFile $JoinLog) }
         "connect_stream"    { return (Test-ConnectStream    -HostFile $HostLog -JoinFile $JoinLog) }
         "prod_probe"     { return (Test-ProdProbe      -HostFile $HostLog -JoinFile $JoinLog) }

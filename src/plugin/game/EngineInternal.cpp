@@ -98,29 +98,42 @@ std::vector<SaveEdgeRec> g_saveEdges;
 bool g_saveSuppressAll = false;
 SaveMgrSaveNameFn g_saveHookOrig = 0;
 
-void __fastcall saveMgrSave_hook(SaveManager* self, const std::string* name,
-                                 bool autosave) {
-    char nm[48];
-    nm[0] = '\0';
+// A save/load name as the engine passed it, whole (MAX_PATH bytes), so a name
+// too long for the 48-byte edge and wire fields is told apart from a short one.
+static void copyEngineName(const std::string* name, char* out, unsigned int cap) {
+    out[0] = '\0';
     __try {
         if (name) {
-            strncpy(nm, name->c_str(), sizeof(nm) - 1);
-            nm[sizeof(nm) - 1] = '\0';
+            strncpy(out, name->c_str(), cap - 1);
+            out[cap - 1] = '\0';
         }
-    } __except (EXCEPTION_EXECUTE_HANDLER) { nm[0] = '\0'; }
+    } __except (EXCEPTION_EXECUTE_HANDLER) { out[0] = '\0'; }
+}
+
+// The 48-byte edge copy; true when the name had to be cut (co-op cannot use it).
+static bool edgeName(const char* full, char out[48]) {
+    strncpy(out, full, 47);
+    out[47] = '\0';
+    return strlen(full) > 46;   // 47 bytes could be a cut longer name
+}
+
+void __fastcall saveMgrSave_hook(SaveManager* self, const std::string* name,
+                                 bool autosave) {
+    char nm[MAX_PATH];
+    copyEngineName(name, nm, sizeof(nm));
     const bool suppress = g_saveSuppressAll;
     if (!suppress) g_saveHookOrig(self, name, autosave);
     __try {
         SaveEdgeRec r;
         memset(&r, 0, sizeof(r));
-        strncpy(r.name, nm, sizeof(r.name) - 1);
+        r.toolong    = edgeName(nm, r.name) ? 1 : 0;
         r.autosave   = autosave ? 1 : 0;
         r.suppressed = suppress ? 1 : 0;
         if (g_saveEdges.size() < 8) g_saveEdges.push_back(r);
-        char b[144];
+        char b[176];
         _snprintf(b, sizeof(b) - 1,
-                  "[save] LOCAL-SAVE name='%s' autosave=%d suppressed=%d",
-                  r.name, r.autosave, r.suppressed);
+                  "[save] LOCAL-SAVE name='%s' autosave=%d suppressed=%d%s",
+                  r.name, r.autosave, r.suppressed, r.toolong ? " TOO-LONG" : "");
         b[sizeof(b) - 1] = '\0'; coop::logLine(b);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
@@ -176,13 +189,13 @@ static bool loadDetourEdge(const char* nm, const char* via) {
     __try {
         LoadEdgeRec r;
         memset(&r, 0, sizeof(r));
-        strncpy(r.name, nm, sizeof(r.name) - 1);
+        r.toolong    = edgeName(nm, r.name) ? 1 : 0;
         r.suppressed = suppress ? 1 : 0;
         if (g_loadEdges.size() < 8) g_loadEdges.push_back(r);
-        char b[160];
+        char b[176];
         _snprintf(b, sizeof(b) - 1,
-                  "[load] LOCAL-LOAD name='%s' suppressed=%d bypass=%d via=%s",
-                  r.name, r.suppressed, bypass ? 1 : 0, via);
+                  "[load] LOCAL-LOAD name='%s' suppressed=%d bypass=%d via=%s%s",
+                  r.name, r.suppressed, bypass ? 1 : 0, via, r.toolong ? " TOO-LONG" : "");
         b[sizeof(b) - 1] = '\0'; coop::logLine(b);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     return !suppress;
@@ -190,14 +203,8 @@ static bool loadDetourEdge(const char* nm, const char* via) {
 
 void __fastcall saveMgrLoad_hook(SaveManager* self, const std::string* name) {
     if (g_inLoadDetour) { g_loadHookOrig(self, name); return; }
-    char nm[48];
-    nm[0] = '\0';
-    __try {
-        if (name) {
-            strncpy(nm, name->c_str(), sizeof(nm) - 1);
-            nm[sizeof(nm) - 1] = '\0';
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) { nm[0] = '\0'; }
+    char nm[MAX_PATH];
+    copyEngineName(name, nm, sizeof(nm));
     if (loadDetourEdge(nm, "name")) {
         g_inLoadDetour = true;
         g_loadHookOrig(self, name);
@@ -210,7 +217,7 @@ void __fastcall saveMgrLoad_hook(SaveManager* self, const std::string* name) {
 void __fastcall saveMgrLoadInfo_hook(SaveManager* self, const SaveInfo* info,
                                      bool resetPos) {
     if (g_inLoadDetour) { g_loadInfoHookOrig(self, info, resetPos); return; }
-    char nm[48];
+    char nm[MAX_PATH];
     nm[0] = '\0';
     __try {
         if (info) {
@@ -2125,6 +2132,7 @@ unsigned int drainSaveEdges(SaveEdge* out, unsigned int maxOut) {
         memcpy(out[n].name, g_saveEdges[i].name, sizeof(out[n].name));
         out[n].autosave   = g_saveEdges[i].autosave;
         out[n].suppressed = g_saveEdges[i].suppressed;
+        out[n].toolong    = g_saveEdges[i].toolong;
     }
     g_saveEdges.clear();
     return n;
@@ -2153,6 +2161,7 @@ unsigned int drainLoadEdges(LoadEdge* out, unsigned int maxOut) {
     for (unsigned int i = 0; i < g_loadEdges.size() && n < maxOut; ++i, ++n) {
         memcpy(out[n].name, g_loadEdges[i].name, sizeof(out[n].name));
         out[n].suppressed = g_loadEdges[i].suppressed;
+        out[n].toolong    = g_loadEdges[i].toolong;
     }
     g_loadEdges.clear();
     return n;

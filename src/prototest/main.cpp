@@ -819,6 +819,29 @@ static int xferRun(const char* name, const XferSrcFile* srcs, unsigned nsrc,
     return savexfer::onSaveDone(dh, crcs.empty() ? (const u32*)0 : &crcs[0], &of, &ob);
 }
 
+// Every save name that builds a path from the network or a detour edge.
+static void testSaveNames() {
+    std::printf("== save names (what may build a path) ==\n");
+    CHECK("name: plain", savexfer::saveNameSafe("coopresume"));
+    CHECK("name: spaces and digits", savexfer::saveNameSafe("Partida 2 de Ana"));
+    CHECK("name: UTF-8 letters", savexfer::saveNameSafe("Partida de \xC3\x81lvaro \xC3\xB1"));
+    CHECK("name: 46 bytes fits", savexfer::saveNameSafe(std::string(46, 'a')));
+    CHECK("name: 47 bytes may be a cut one", !savexfer::saveNameSafe(std::string(47, 'a')));
+    CHECK("name: empty", !savexfer::saveNameSafe(""));
+    CHECK("name: parent dir", !savexfer::saveNameSafe("..\\..\\Documents"));
+    CHECK("name: '..' inside", !savexfer::saveNameSafe("a..b"));
+    CHECK("name: slash", !savexfer::saveNameSafe("a/b"));
+    CHECK("name: backslash", !savexfer::saveNameSafe("a\\b"));
+    CHECK("name: drive", !savexfer::saveNameSafe("C:x"));
+    CHECK("name: device", !savexfer::saveNameSafe("CON"));
+    CHECK("name: device with extension", !savexfer::saveNameSafe("nul.txt"));
+    CHECK("name: device-like word is fine", savexfer::saveNameSafe("Console"));
+    CHECK("name: trailing dot", !savexfer::saveNameSafe("save."));
+    CHECK("name: trailing space", !savexfer::saveNameSafe("save "));
+    CHECK("name: control char", !savexfer::saveNameSafe("a\tb"));
+    CHECK("name: wildcard", !savexfer::saveNameSafe("a*b"));
+}
+
 static void testSaveXferRoundTrip() {
     std::printf("== save-transfer receiver round-trip (stage/verify/commit) ==\n");
 
@@ -832,7 +855,11 @@ static void testSaveXferRoundTrip() {
     std::string rootStr = root;
     xferNukeDir(rootStr);                 // best-effort clean from a prior run
     CreateDirectoryA(rootStr.c_str(), 0);
-    savexfer::setSaveRootForTest(rootStr);
+    // The save root is <root>\save, so the incoming and backup folders that sit
+    // beside it (<root>\TokelaCoop_incoming, \TokelaCoop_backups) stay inside root.
+    const std::string saveRoot = rootStr + "\\save";
+    CreateDirectoryA(saveRoot.c_str(), 0);
+    savexfer::setSaveRootForTest(saveRoot);
 
     // A representative save: a multi-chunk core, two subdir files, and an empty
     // file (exercises subdir creation + the dataLen=0 chunk path).
@@ -865,7 +892,9 @@ static void testSaveXferRoundTrip() {
     CHECK("xfer committed folder is byte-identical (incl. subdirs + empty file)",
           allMatch);
 
-    std::string staging = savexfer::saveFolderFor(std::string("coopresume") + "__incoming");
+    std::string staging = savexfer::incomingFolderFor("coopresume");
+    CHECK("xfer stages outside the save folder",
+          staging.find("TokelaCoop_incoming") != std::string::npos);
     CHECK("xfer staging removed after commit",
           GetFileAttributesA(staging.c_str()) == INVALID_FILE_ATTRIBUTES);
 
@@ -2233,6 +2262,7 @@ int main() {
     testFraming();
     testSaveCrc();
     testFolderFingerprint();
+    testSaveNames();
     testSaveXferRoundTrip();
     testContentHash();
     testInterp();

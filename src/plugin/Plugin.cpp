@@ -192,11 +192,73 @@ std::string& g_loadXferPending = g_session.loadXferPending;
 std::string& g_loadAfterCommit = g_session.loadAfterCommit;
 coop::u32&   g_loadCommitBase  = g_session.loadCommitBase;
 DWORD&       g_loadPumpArmTick  = g_session.loadPumpArmTick;
-// A streamed save gets one more try when the friend's copy fails its check
-// (Kenshi rewrote a file after the folder looked settled).
-std::string  g_saveRetryName;
+// HOST: a transfer that did not land gets another go. A save (the friend is not
+// waiting for it) is sent once more from a settled folder when the friend's copy
+// fails its check or a file is rewritten under it; a LOAD's copy is the friend's
+// to ask for again (it re-NACKs), so the host only resends on that request.
 int          g_saveRetryLeft   = 0;
-bool         g_lastSendWasSave = false;
+int          g_lastSendKind    = 0;     // 0 none, 1 a save, 2 a load's copy
+std::string  g_lastSendName;
+bool         g_connectPushDeferred = false;   // the friend came in mid-load
+std::deque<std::string> g_saveReqBacklog;     // friend's saves while ours is busy
+// The friend's latest load ask (id, name), held while a save is still being made:
+// Kenshi's save manager runs one save OR load at a time, and a load issued in the
+// same breath as a save was lost (the host never reloaded; the friend did).
+std::pair<coop::u32, std::string> g_loadReqPending;
+// JOIN: the friend's own save press (forwarded to the host) until its copy lands,
+// and a load waiting for its copy (the NACK it answers, for a re-ask).
+std::string  g_joinSaveReq;
+DWORD        g_joinSaveReqTick  = 0;
+coop::u32    g_joinSeenCommit   = 0;     // commitSeq already told to the friend
+coop::u32    g_loadNackId       = 0;
+coop::u32    g_loadNackFp       = 0;
+DWORD        g_loadNackTick     = 0;
+int          g_loadNackTries    = 0;
+// A short line on the banner about saving and loading, until g_noticeUntil.
+std::string  g_notice;
+int          g_noticeState      = 2;
+DWORD        g_noticeUntil      = 0;
+
+static void showNotice(const std::string& text, int state, DWORD ms) {
+    g_notice = text;
+    g_noticeState = state;
+    g_noticeUntil = GetTickCount() + ms;
+    if (g_noticeUntil == 0) g_noticeUntil = 1;
+}
+
+// The save/load hand-off of one session, dropped when it ends or a new one
+// starts (both halves: a role switch resets too). JOIN: a copy still staging, a
+// load waiting for one, the newest host load order seen (a restarted host counts
+// from 1 again, so keeping the old mark ignored every order of the new session),
+// and a save press still waiting for its copy. HOST: the transfer under way and
+// its retries, a pending connect push, friend saves waiting for ours to finish.
+static void resetSaveLoadHandoff(const char* why) {
+    if (coop::savexfer::sending()) coop::savexfer::abortSend(g_net, g_net.localId(), why);
+    g_saveRetryLeft = 0;
+    g_loadXferPending.clear();
+    g_bootstrapArmed = false;
+    g_bootstrapName.clear();
+    g_connectPushDeferred = false;
+    g_saveReqBacklog.clear();
+    g_loadReqPending = std::make_pair((coop::u32)0, std::string());
+    coop::savexfer::abortReceive(why);
+    g_loadIdSeen = 0;
+    g_loadAfterCommit.clear();
+    g_loadCommitBase = coop::savexfer::commitSeq();
+    g_loadNackTries = 0;
+    if (!g_joinSaveReq.empty())
+        showNotice(coop::L("Co-op: no se pudo guardar - tu amigo se ha desconectado",
+                           "Co-op: not saved - your friend disconnected"), 0, 10000);
+    g_joinSaveReq.clear();
+}
+
+// "<es/en text with one %s>" + a save name.
+static std::string noticeWithName(const char* es, const char* en, const std::string& name) {
+    char b[256];
+    _snprintf(b, sizeof(b) - 1, coop::L(es, en), name.c_str());
+    b[sizeof(b) - 1] = '\0';
+    return b;
+}
 
 // Scenario harness state. Harness/Debug builds only - the shipped Release DLL
 // excludes test/Scenario*.cpp and does not define TOKELACOOP_HARNESS (Phase 1).
@@ -288,6 +350,7 @@ void sessionResetForUi() {
     if (!g_cfg.isHost && g_cfg.saveSync)
         coopLog("[save] JOIN save suppression OFF (session reset)");
     coop::engine::setSaveSuppress(false);
+    resetSaveLoadHandoff("session reset");
     g_peerPresent = false;
     g_peerId = 0;
     g_modsLine.clear();
@@ -407,10 +470,22 @@ void sessionResetForWorldReload() {
 // starting with a peer already connected (mainLoop_hook gameplay-start edge).
 // Host + saveSync + in-game are the caller's responsibility.
 void armConnectPush() {
-    char cur[64];
+    g_connectPushDeferred = false;
+    char cur[MAX_PATH];
     cur[0] = '\0';
     coop::engine::saveInfo(cur, sizeof(cur), 0, 0);
     std::string name = cur[0] ? cur : "coopresume";
+    if (!coop::savexfer::saveNameSafe(name)) {
+        // A name the 48-byte wire fields cannot carry (or not a plain folder
+        // name): the friend would wait for a save that never comes. Bake the
+        // world under the default name instead, and say so.
+        char b[MAX_PATH + 96];
+        _snprintf(b, sizeof(b) - 1, "[boot] save name '%s' cannot travel; pushing as 'coopresume'", name.c_str());
+        b[sizeof(b) - 1] = '\0'; coopErr(b);
+        name = "coopresume";
+        showNotice(coop::L("Co-op: el nombre de la partida es demasiado largo; se guarda como 'coopresume'",
+                           "Co-op: the save name is too long; saving as 'coopresume'"), 1, 15000);
+    }
     g_bootstrapArmed = true;
     g_bootstrapName  = name;
     char b[144];
@@ -609,12 +684,23 @@ void processNetEvents(GameWorld* gw) {
             coop::engine::setSaveSuppress(true);
             coopLog("[save] JOIN save suppression ON (host save is authoritative)");
         }
+        // A fresh session: nothing of a previous one's hand-off may answer it.
+        if (!g_cfg.isHost) resetSaveLoadHandoff("new session");
         // Push-save-on-connect (host): if already in a game, bake+announce the
         // live world so the join can enter it with no pre-shared save. If the
         // host is NOT yet in-game (title/loading), the gameplay-start edge in
         // mainLoop_hook arms this instead - covers either connect ordering.
-        if (g_cfg.isHost && g_cfg.saveSync && g_gameStarted)
-            armConnectPush();
+        // Mid-load (or with the save manager busy) the save would take the
+        // load's place, or write the old world into the save being loaded: it
+        // waits for the first live tick (driveSaveSync, g_connectPushDeferred).
+        if (g_cfg.isHost && g_cfg.saveSync && g_gameStarted) {
+            if (liveGw && coop::engine::saveMgrSignal(0) == 0) {
+                armConnectPush();
+            } else {
+                g_connectPushDeferred = true;
+                coopLog("[boot] friend connected mid-load: the world goes out once it is loaded");
+            }
+        }
       } else {
         char b[64];
         _snprintf(b, sizeof(b) - 1, "handshake: peer left id=%u", (unsigned)it->id);
@@ -635,6 +721,7 @@ void processNetEvents(GameWorld* gw) {
             coop::engine::setSaveSuppress(false);
             coopLog("[save] JOIN save suppression OFF (peer left)");
         }
+        resetSaveLoadHandoff("friend left");
         // Phase 2 crash hardening: a peer drop leaves this side's minted proxies
         // standing AND its drive maps pointing at bodies with no fresh authority
         // (the engine will eventually reap them, and the next drive touches a
@@ -649,6 +736,63 @@ void processNetEvents(GameWorld* gw) {
     checkModLists();
 }
 
+// HOST: our last save did not land on the friend's side (their copy failed its
+// check, or a file was rewritten under the transfer): send it once more, from a
+// folder that has held still. A load's copy is not retried here - the friend,
+// who waits for it, asks again (driveLoadSync).
+void retryLastSave(const char* why) {
+    if (!g_peerPresent || g_lastSendKind != 1 || g_lastSendName.empty()) return;
+    if (g_saveRetryLeft <= 0 || coop::savexfer::watching()) return;   // a newer save is coming
+    --g_saveRetryLeft;
+    g_savePending = g_lastSendName;
+    coop::savexfer::armWatchRetry(g_savePending);
+    char rb[200];
+    _snprintf(rb, sizeof(rb) - 1, "[save] XFER-RETRY name='%s' (%s)", g_savePending.c_str(), why);
+    rb[sizeof(rb) - 1] = '\0'; coopLog(rb);
+}
+
+// HOST: a send that stopped short because the save changed under it.
+void handleSendAbort() {
+    std::string nm;
+    if (coop::savexfer::takeSendAbort(&nm) == coop::savexfer::SEND_ABORT_CHANGED &&
+        _stricmp(nm.c_str(), g_lastSendName.c_str()) == 0)
+        retryLastSave("a file changed under the transfer");
+}
+
+// JOIN: the host's copy for a load we wait on did not land. Ask for it again (the
+// same NACK: a host that has since loaded something else ignores it as stale), up
+// to three times; then stop waiting - disconnect, so this game never carries on
+// syncing a world the host has left - and say what to do.
+void askLoadCopyAgain(const char* why) {
+    char b[224];
+    if (g_loadNackTries >= 3) {
+        _snprintf(b, sizeof(b) - 1, "[load] copy of '%s' never landed (%s): giving up",
+                  g_loadAfterCommit.c_str(), why);
+        b[sizeof(b) - 1] = '\0'; coopErr(b);
+        g_loadAfterCommit.clear();
+        coopUiDisconnect();
+        showNotice(coop::L("Co-op: no lleg\xC3\xB3 la partida de tu amigo - vuelve a unirte desde F2",
+                           "Co-op: your friend's game did not arrive - join again from F2"), 0, 30000);
+        return;
+    }
+    ++g_loadNackTries;
+    g_loadNackTick   = GetTickCount();
+    g_loadCommitBase = coop::savexfer::commitSeq();
+    coop::LoadNackPacket nk;
+    memset(&nk, 0, sizeof(nk));
+    nk.type        = (coop::u8)coop::PKT_LOAD_NACK;
+    nk.ownerId     = g_net.localId();
+    nk.loadId      = g_loadNackId;
+    nk.fingerprint = g_loadNackFp;
+    strncpy(nk.name, g_loadAfterCommit.c_str(), sizeof(nk.name) - 1);
+    g_net.queueLoadNack(nk);
+    _snprintf(b, sizeof(b) - 1, "[load] copy of '%s' did not land (%s): asking again (%d/3)",
+              g_loadAfterCommit.c_str(), why, g_loadNackTries);
+    b[sizeof(b) - 1] = '\0'; coopLog(b);
+    showNotice(coop::L("Co-op: la partida no ha llegado bien; se pide otra vez...",
+                       "Co-op: the game did not arrive intact; asking again..."), 1, 10000);
+}
+
 // SaveLoadCoordinator receive primitive (protocol 31): the join-side save-
 // transfer receive pump. Drain staged BEGIN/FILE/DONE packets, verify + commit
 // the streamed folder, and ACK the outcome. This identical work is needed on two
@@ -657,37 +801,41 @@ void processNetEvents(GameWorld* gw) {
 // being copy-pasted into both. Emits no log line, so the oracle log contract is
 // unaffected by the extraction.
 void pumpSaveReceive() {
+    // One snapshot of the three queues, replayed in arrival order (seq): a DONE
+    // is only verified after every chunk that came ahead of it, and a new BEGIN
+    // only after the previous transfer's DONE.
     std::deque<coop::InboundSaveBegin> begins;
-    g_inbound.drainSaveBegins(begins);
-    for (std::deque<coop::InboundSaveBegin>::iterator it = begins.begin();
-         it != begins.end(); ++it)
-        coop::savexfer::onSaveBegin(it->pkt);
-
     std::deque<coop::InboundSaveFile> chunks;
-    g_inbound.drainSaveFiles(chunks);
-    for (std::deque<coop::InboundSaveFile>::iterator it = chunks.begin();
-         it != chunks.end(); ++it)
-        coop::savexfer::onSaveFile(it->hdr, it->path.c_str(),
-                                   it->data.empty() ? 0 : &it->data[0]);
-
     std::deque<coop::InboundSaveDone> dones;
-    g_inbound.drainSaveDones(dones);
-    for (std::deque<coop::InboundSaveDone>::iterator it = dones.begin();
-         it != dones.end(); ++it) {
-        coop::u16 files = 0;
-        unsigned __int64 bytes = 0;
-        int ok = coop::savexfer::onSaveDone(it->hdr,
-                                            it->crcs.empty() ? 0 : &it->crcs[0],
-                                            &files, &bytes);
-        coop::SaveAckPacket ack;
-        memset(&ack, 0, sizeof(ack));
-        ack.type    = (coop::u8)coop::PKT_SAVE_ACK;
-        ack.ownerId = g_net.localId();
-        ack.xferId  = it->hdr.xferId;
-        ack.ok      = ok ? 1 : 0;
-        ack.files   = files;
-        ack.bytes   = bytes;
-        g_net.queueSaveAck(ack);
+    g_inbound.drainSaveXfer(begins, chunks, dones);
+    size_t ib = 0, ic = 0, id = 0;
+    for (;;) {
+        const coop::u32 NONE = 0xFFFFFFFFu;
+        const coop::u32 sb = ib < begins.size() ? begins[ib].seq : NONE;
+        const coop::u32 sc = ic < chunks.size() ? chunks[ic].seq : NONE;
+        const coop::u32 sd = id < dones.size()  ? dones[id].seq  : NONE;
+        if (sb == NONE && sc == NONE && sd == NONE) break;
+        if (sb < sc && sb < sd) {
+            coop::savexfer::onSaveBegin(begins[ib++].pkt);
+        } else if (sc < sd) {
+            const coop::InboundSaveFile& f = chunks[ic++];
+            coop::savexfer::onSaveFile(f.hdr, f.path.c_str(), f.data.empty() ? 0 : &f.data[0]);
+        } else {
+            const coop::InboundSaveDone& d = dones[id++];
+            coop::u16 files = 0;
+            unsigned __int64 bytes = 0;
+            int ok = coop::savexfer::onSaveDone(d.hdr, d.crcs.empty() ? 0 : &d.crcs[0],
+                                                &files, &bytes);
+            coop::SaveAckPacket ack;
+            memset(&ack, 0, sizeof(ack));
+            ack.type    = (coop::u8)coop::PKT_SAVE_ACK;
+            ack.ownerId = g_net.localId();
+            ack.xferId  = d.hdr.xferId;
+            ack.ok      = ok ? 1 : 0;
+            ack.files   = files;
+            ack.bytes   = bytes;
+            g_net.queueSaveAck(ack);
+        }
     }
 }
 
@@ -704,7 +852,7 @@ void pumpSaveReceive() {
 // PKT_SAVE_REQ (autosave edges are dropped - the host's own autosave already
 // drives a coordinated save). Received BEGIN/FILE/DONE stage + verify +
 // commit the host's folder; the ACK reports the outcome.
-void driveSaveSync() {
+void driveSaveSync(GameWorld* gw) {
     // An autosave's later squad-owner writes (see g_ledgerRewriteTick).
     if (g_ledgerRewriteTick != 0 && (long)(GetTickCount() - g_ledgerRewriteTick) >= 0) {
         static const DWORD kNextMs[] = { 2500, 4000 };   // +1.5 s -> +4 s -> +8 s
@@ -723,7 +871,10 @@ void driveSaveSync() {
     unsigned int nEdges = coop::engine::drainSaveEdges(edges, 8);
     for (unsigned int i = 0; i < nEdges; ++i) {
         std::string name = edges[i].name[0] ? edges[i].name : "coopresume";
-        if (g_cfg.isHost && !edges[i].suppressed) {
+        // A name the 48-byte edge/wire fields cut (or not a plain folder name)
+        // cannot be streamed, announced or asked for: say so, never fail silently.
+        const bool usable = !edges[i].toolong && coop::savexfer::saveNameSafe(name);
+        if (g_cfg.isHost && !edges[i].suppressed && usable) {
             // Every save carries the squad-tab owners. A streamed save writes
             // them again when its folder settles (below), before anything is
             // fingerprinted or sent; an autosave gets a late second write.
@@ -748,11 +899,31 @@ void driveSaveSync() {
                 b[sizeof(b) - 1] = '\0'; coopLog(b);
                 continue;
             }
+            if (!usable) {
+                char b[160];
+                _snprintf(b, sizeof(b) - 1, "[save] '%s' not streamed: the name is too long or unusable", name.c_str());
+                b[sizeof(b) - 1] = '\0'; coopErr(b);
+                if (g_peerPresent)
+                    showNotice(coop::L("Co-op: nombre de partida demasiado largo - tu amigo no recibe esta partida",
+                                       "Co-op: save name too long - your friend does not get this save"), 0, 12000);
+                continue;
+            }
+            // The same save written again while it is being sent: the transfer
+            // in flight reads a folder being rewritten. Drop it; this edge's own
+            // watch sends the new save once it settles.
+            if (coop::savexfer::sending() &&
+                _stricmp(coop::savexfer::sendingName().c_str(), name.c_str()) == 0)
+                coop::savexfer::abortSend(g_net, g_net.localId(), "the same save is being written again");
             g_savePending = name;
-            g_saveRetryName = name;
             g_saveRetryLeft = 1;
             coop::savexfer::armWatch(name);
         } else if (edges[i].suppressed && !edges[i].autosave) {
+            if (!usable) {
+                coopErr("[save] not forwarded: the save name is too long or unusable");
+                showNotice(coop::L("Co-op: nombre de partida demasiado largo - usa uno m\xC3\xA1s corto",
+                                   "Co-op: save name too long - use a shorter one"), 0, 10000);
+                continue;
+            }
             coop::SaveReqPacket rq;
             memset(&rq, 0, sizeof(rq));
             rq.type    = (coop::u8)coop::PKT_SAVE_REQ;
@@ -764,12 +935,20 @@ void driveSaveSync() {
             _snprintf(b, sizeof(b) - 1, "[save] REQ->host id=%u name='%s'",
                       rq.reqId, name.c_str());
             b[sizeof(b) - 1] = '\0'; coopLog(b);
+            // The friend's save is the host's to make: say what happens until the
+            // copy lands here (or does not).
+            g_joinSaveReq      = name;
+            g_joinSaveReqTick  = GetTickCount();
+            showNotice(noticeWithName("Co-op: guardando '%s' en la partida de tu amigo...",
+                                      "Co-op: saving '%s' in your friend's game...", name), 1, 300000);
         }
     }
 
     if (g_cfg.isHost) {
         // Join save requests -> the ONE authoritative save (the saveGameAs
-        // below re-enters the detour, whose edge arms the watch above).
+        // below re-enters the detour, whose edge arms the watch above). They
+        // wait while our own save is still being written or the save manager
+        // is busy (a save would take a pending load's place); a load drops them.
         std::deque<coop::InboundSaveReq> reqs;
         g_inbound.drainSaveReqs(reqs);
         for (std::deque<coop::InboundSaveReq>::iterator it = reqs.begin();
@@ -777,13 +956,41 @@ void driveSaveSync() {
             char name[sizeof(it->pkt.name) + 1];
             memcpy(name, it->pkt.name, sizeof(it->pkt.name));
             name[sizeof(it->pkt.name)] = '\0';
-            char b[144];
-            _snprintf(b, sizeof(b) - 1,
-                      "[save] REQ from join id=%u name='%s' -> saving",
-                      it->pkt.reqId, name);
+            const std::string nm = name[0] ? name : "coopresume";
+            char b[176];
+            if (!coop::savexfer::saveNameSafe(nm)) {
+                _snprintf(b, sizeof(b) - 1, "[save] REQ from join id=%u REFUSED: unusable save name", it->pkt.reqId);
+                b[sizeof(b) - 1] = '\0'; coopErr(b);
+                continue;
+            }
+            if (g_saveReqBacklog.size() < 4) g_saveReqBacklog.push_back(nm);
+            _snprintf(b, sizeof(b) - 1, "[save] REQ from join id=%u name='%s' -> saving",
+                      it->pkt.reqId, nm.c_str());
             b[sizeof(b) - 1] = '\0'; coopLog(b);
-            if (!coop::engine::saveGameAs(name[0] ? name : "coopresume"))
+        }
+        const bool live = gw && g_gameStarted && g_swapStartTick == 0 &&
+                          coop::engine::gameplayLive(gw);
+        if (!g_saveReqBacklog.empty() && live && !coop::savexfer::watching() &&
+            coop::engine::saveMgrSignal(0) == 0) {
+            const std::string nm = g_saveReqBacklog.front();
+            g_saveReqBacklog.pop_front();
+            // The friend picked the name: a different save of ours under it is
+            // kept as a backup before this one replaces it.
+            char cur[MAX_PATH];
+            cur[0] = '\0';
+            coop::engine::saveInfo(cur, sizeof(cur), 0, 0);
+            if (_stricmp(cur, nm.c_str()) != 0) coop::savexfer::backupSaveFolder(nm);
+            if (!coop::engine::saveGameAs(nm))
                 coopErr("[save] join-requested save FAILED to issue");
+            else
+                showNotice(noticeWithName("Co-op: tu amigo ha guardado la partida ('%s')",
+                                          "Co-op: your friend saved the game ('%s')", nm), 2, 6000);
+        }
+        // A friend who came in mid-load gets the world once it is loaded.
+        if (g_connectPushDeferred) {
+            if (!g_peerPresent) g_connectPushDeferred = false;
+            else if (live && coop::engine::saveMgrSignal(0) == 0 && !coop::savexfer::watching())
+                armConnectPush();
         }
 
         // Quiescence watch -> start the transfer once the save is on disk.
@@ -828,8 +1035,10 @@ void driveSaveSync() {
                     g_bootstrapName.clear();
                     g_savePending.clear();
                 } else if (g_peerPresent) {
-                    if (coop::savexfer::beginSend(g_net, g_net.localId(), g_savePending))
-                        g_lastSendWasSave = true;
+                    if (coop::savexfer::beginSend(g_net, g_net.localId(), g_savePending)) {
+                        g_lastSendKind = 1;
+                        g_lastSendName = g_savePending;
+                    }
                 } else
                     coopLog("[save] no peer connected; transfer skipped");
             }
@@ -837,6 +1046,7 @@ void driveSaveSync() {
         // Paced chunk pump for an in-flight transfer.
         if (coop::savexfer::sending())
             coop::savexfer::tickSend(g_net, g_net.localId());
+        handleSendAbort();
 
         // Join commit acknowledgements.
         std::deque<coop::InboundSaveAck> acks;
@@ -851,23 +1061,42 @@ void driveSaveSync() {
             b[sizeof(b) - 1] = '\0';
             if (it->pkt.ok) coopLog(b); else coopErr(b);
             coop::savexfer::noteAck(it->pkt.xferId, it->pkt.ok ? 1 : 0);
-            // The friend's copy failed its check: send the save once more once
-            // the folder holds still (a later save supersedes the retry).
-            if (!it->pkt.ok && g_lastSendWasSave && g_saveRetryLeft > 0 && !g_saveRetryName.empty() &&
-                it->pkt.xferId == coop::savexfer::lastSentXferId() && g_peerPresent &&
-                !coop::savexfer::watching() && !coop::savexfer::sending()) {
-                --g_saveRetryLeft;
-                g_savePending = g_saveRetryName;
-                coop::savexfer::armWatchRetry(g_savePending);
-                char rb[160];
-                _snprintf(rb, sizeof(rb) - 1, "[save] XFER-RETRY name='%s' (the friend's copy failed its check)",
-                          g_savePending.c_str());
-                rb[sizeof(rb) - 1] = '\0'; coopLog(rb);
-            }
+            // The friend's copy of our last save failed its check: send it again.
+            if (!it->pkt.ok && it->pkt.xferId == coop::savexfer::lastSentXferId() &&
+                !coop::savexfer::sending())
+                retryLastSave("the friend's copy failed its check");
         }
     } else {
         // Receiver half: stage, verify, commit, acknowledge (shared pump).
         pumpSaveReceive();
+        // What landed, told to the friend: their own save press, or a save the
+        // host made. (A load's copy is driveLoadSync's.)
+        if (coop::savexfer::commitSeq() != g_joinSeenCommit) {
+            g_joinSeenCommit = coop::savexfer::commitSeq();
+            const std::string nm = coop::savexfer::lastCommitName();
+            const bool ok = coop::savexfer::lastCommitResult() == 1;
+            if (!g_joinSaveReq.empty() && _stricmp(nm.c_str(), g_joinSaveReq.c_str()) == 0) {
+                if (ok) {
+                    showNotice(noticeWithName("Co-op: partida guardada ('%s')", "Co-op: game saved ('%s')", nm), 2, 6000);
+                    g_joinSaveReq.clear();
+                } else {
+                    // The host sends a failed save once more: keep waiting.
+                    showNotice(coop::L("Co-op: la partida no ha llegado bien; tu amigo la reenv\xC3\xAD" "a...",
+                                       "Co-op: the save did not arrive intact; your friend resends it..."), 1, 300000);
+                    g_joinSaveReqTick = GetTickCount();
+                }
+            } else if (ok && g_loadAfterCommit.empty() && g_gameStarted) {
+                showNotice(noticeWithName("Co-op: tu amigo ha guardado la partida ('%s')",
+                                          "Co-op: your friend saved the game ('%s')", nm), 2, 5000);
+            }
+        }
+        if (!g_joinSaveReq.empty() && !coop::savexfer::receiving() &&
+            GetTickCount() - g_joinSaveReqTick > 300000) {
+            coopErr("[save] the host never sent the save the friend asked for");
+            showNotice(coop::L("Co-op: no se pudo guardar - tu amigo no ha enviado la partida",
+                               "Co-op: not saved - your friend did not send the save"), 0, 12000);
+            g_joinSaveReq.clear();
+        }
     }
 }
 
@@ -897,10 +1126,28 @@ void driveLoadSync(GameWorld* gw) {
             // The title-screen auto-load precedes gameplay (and any peer) -
             // only a MID-SESSION load edge coordinates.
             if (!g_gameStarted) continue;
-            // A load supersedes any in-flight save coordination.
-            coop::savexfer::abortAll();
+            // A load supersedes any in-flight save coordination: the transfer,
+            // its retry, the friend's saves of the old world, a connect push.
+            coop::savexfer::abortAll(g_net, g_net.localId());
             g_savePending.clear();
             g_saveRetryLeft = 0;
+            g_saveReqBacklog.clear();
+            g_bootstrapArmed = false;
+            g_bootstrapName.clear();
+            if (edges[i].toolong || !coop::savexfer::saveNameSafe(name)) {
+                char b[176];
+                _snprintf(b, sizeof(b) - 1, "[load] '%s' cannot be announced: the name is too long or unusable",
+                          name.c_str());
+                b[sizeof(b) - 1] = '\0'; coopErr(b);
+                if (g_peerPresent) {
+                    // The friend cannot follow: two worlds must never sync.
+                    coopUiDisconnect();
+                    showNotice(coop::L("Co-op: nombre de partida demasiado largo - gu\xC3\xA1rdala con uno m\xC3\xA1s corto y vuelve a conectar",
+                                       "Co-op: save name too long - save it under a shorter name and connect again"), 0, 30000);
+                }
+                continue;
+            }
+            g_connectPushDeferred = false;   // this GO is the push
             coop::LoadGoPacket go;
             memset(&go, 0, sizeof(go));
             go.type        = (coop::u8)coop::PKT_LOAD_GO;
@@ -917,7 +1164,15 @@ void driveLoadSync(GameWorld* gw) {
             b[sizeof(b) - 1] = '\0'; coopLog(b);
             warnIfNoPortraits(name);
         } else if (edges[i].suppressed) {
+            if (edges[i].toolong || !coop::savexfer::saveNameSafe(name)) {
+                coopErr("[load] not forwarded: the save name is too long or unusable");
+                showNotice(coop::L("Co-op: nombre de partida demasiado largo para el cooperativo",
+                                   "Co-op: save name too long for co-op"), 0, 10000);
+                continue;
+            }
             // Forward the swallowed manual load for host arbitration.
+            showNotice(noticeWithName("Co-op: pidiendo a tu amigo que cargue '%s'...",
+                                      "Co-op: asking your friend to load '%s'...", name), 1, 8000);
             coop::LoadReqPacket rq;
             memset(&rq, 0, sizeof(rq));
             rq.type    = (coop::u8)coop::PKT_LOAD_REQ;
@@ -955,12 +1210,20 @@ void driveLoadSync(GameWorld* gw) {
                 b[sizeof(b) - 1] = '\0'; coopErr(b);
                 continue;
             }
-            char b[144];
+            g_loadReqPending = std::make_pair(it->pkt.reqId, std::string(name));   // the newest ask wins
+        }
+        // ...run once no save is being made (theirs queued, ours settling, or the
+        // save manager still busy with one).
+        if (!g_loadReqPending.second.empty() && g_saveReqBacklog.empty() &&
+            !coop::savexfer::watching() && coop::engine::saveMgrSignal(0) == 0) {
+            char b[160];
             _snprintf(b, sizeof(b) - 1,
                       "[load] REQ from join id=%u name='%s' -> loading",
-                      it->pkt.reqId, name);
+                      g_loadReqPending.first, g_loadReqPending.second.c_str());
             b[sizeof(b) - 1] = '\0'; coopLog(b);
-            if (!coop::engine::loadSave(name))
+            const std::string nm = g_loadReqPending.second;
+            g_loadReqPending = std::make_pair((coop::u32)0, std::string());
+            if (!coop::engine::loadSave(nm))
                 coopErr("[load] join-requested load FAILED to issue");
         }
 
@@ -981,27 +1244,44 @@ void driveLoadSync(GameWorld* gw) {
                 b[sizeof(b) - 1] = '\0'; coopLog(b);
                 continue;
             }
+            if (!coop::savexfer::saveNameSafe(name)) continue;
+            // The friend asking again while that copy is still on its way.
+            if (coop::savexfer::sending() &&
+                _stricmp(coop::savexfer::sendingName().c_str(), name) == 0) {
+                _snprintf(b, sizeof(b) - 1, "[load] NACK id=%u name='%s': already sending it",
+                          it->pkt.loadId, name);
+                b[sizeof(b) - 1] = '\0'; coopLog(b);
+                continue;
+            }
             _snprintf(b, sizeof(b) - 1,
                       "[load] NACK id=%u name='%s' joinFp=%08x -> transfer after reload",
                       it->pkt.loadId, name, it->pkt.fingerprint);
             b[sizeof(b) - 1] = '\0'; coopLog(b);
             g_loadXferPending = name;
         }
+        // "Our own reload has completed": the load is deferred, so the world
+        // stays live for a few frames after the GO - the save manager's signal
+        // and the swap tracking say whether it has really happened yet.
         if (!g_loadXferPending.empty() && coop::engine::gameplayLive(gw) &&
-            !coop::savexfer::sending()) {
+            g_swapStartTick == 0 && g_loadPumpArmTick == 0 &&
+            coop::engine::saveMgrSignal(0) == 0 && !coop::savexfer::sending()) {
             char b[144];
             _snprintf(b, sizeof(b) - 1,
                       "[load] starting fallback transfer name='%s'",
                       g_loadXferPending.c_str());
             b[sizeof(b) - 1] = '\0'; coopLog(b);
-            coop::savexfer::beginSend(g_net, g_net.localId(), g_loadXferPending);
-            g_lastSendWasSave = false;   // not a save: no save retry for it
+            if (coop::savexfer::beginSend(g_net, g_net.localId(), g_loadXferPending)) {
+                g_lastSendKind = 2;   // a load's copy: the friend asks again if it fails
+                g_lastSendName = g_loadXferPending;
+            }
             g_loadXferPending.clear();
         }
         // The chunk pump normally lives in driveSaveSync; keep the fallback
         // transfer moving even when saveSync is gated off.
-        if (!g_cfg.saveSync && coop::savexfer::sending())
+        if (!g_cfg.saveSync && coop::savexfer::sending()) {
             coop::savexfer::tickSend(g_net, g_net.localId());
+            handleSendAbort();
+        }
     } else {
         // Test-only (TOKELACOOP_FORCE_STREAM=1, join): force the missing/diverged
         // NACK branch even when our on-disk fingerprint MATCHES the host's, so a
@@ -1028,8 +1308,13 @@ void driveLoadSync(GameWorld* gw) {
             memcpy(name, it->pkt.name, sizeof(it->pkt.name));
             name[sizeof(it->pkt.name)] = '\0';
             if (!name[0]) continue;
-            coop::u32 fp = coop::savexfer::folderFingerprint(name);
             char b[192];
+            if (!coop::savexfer::saveNameSafe(name)) {
+                _snprintf(b, sizeof(b) - 1, "[load] GO id=%u REFUSED: unusable save name", it->pkt.loadId);
+                b[sizeof(b) - 1] = '\0'; coopErr(b);
+                continue;
+            }
+            coop::u32 fp = coop::savexfer::folderFingerprint(name);
             if (!s_forceStream && fp != 0 && fp == it->pkt.fingerprint) {
                 // Our copy is loadable as-is, so load it - ALWAYS, including
                 // when this save is the one already live here. A host
@@ -1066,6 +1351,11 @@ void driveLoadSync(GameWorld* gw) {
                 g_net.queueLoadNack(nk);
                 g_loadAfterCommit = name;
                 g_loadCommitBase  = coop::savexfer::commitSeq();
+                // Kept to ask again if the copy does not land.
+                g_loadNackId    = it->pkt.loadId;
+                g_loadNackFp    = fp;
+                g_loadNackTick  = GetTickCount();
+                g_loadNackTries = 1;
             }
         }
 
@@ -1091,10 +1381,18 @@ void driveLoadSync(GameWorld* gw) {
                 if (!coop::engine::loadSave(g_loadAfterCommit))
                     coopErr("[load] post-transfer load FAILED to issue");
                 g_loadAfterCommit.clear();
+            } else if (_stricmp(coop::savexfer::lastCommitName().c_str(),
+                                g_loadAfterCommit.c_str()) == 0) {
+                askLoadCopyAgain("the copy failed its check");
             } else {
-                // Some other/failed commit landed; re-base and keep waiting.
+                // Some other commit landed; re-base and keep waiting.
                 g_loadCommitBase = coop::savexfer::commitSeq();
             }
+        } else if (!g_loadAfterCommit.empty()) {
+            // Chunks arriving keep the wait alive; a long silence means the copy
+            // was lost (the host stopped, superseded it, or it never started).
+            if (coop::savexfer::receiving()) g_loadNackTick = GetTickCount();
+            else if (GetTickCount() - g_loadNackTick > 90000) askLoadCopyAgain("nothing arrived for 90 s");
         }
     }
 }
@@ -1208,11 +1506,11 @@ void coopPanelDrive(bool atTitle) {
     ps.refuseFinal  = rt.final;
 
     // Join save-transfer status for the panel: while a join streams the host's
-    // world at the menu (no leader -> no screen overlay), show live progress on
-    // the F2 panel. The percent is whole-number so the panel only rebuilds ~100x
+    // world, show live progress on the F2 panel (and, in game, on the banner
+    // below). The percent is whole-number so the panel only rebuilds ~100x
     // over a transfer, not every chunk. Null when not streaming.
     std::string transfer;
-    if (!g_cfg.isHost && g_net.isRunning() && !g_gameStarted) {
+    if (!g_cfg.isHost && g_net.isRunning()) {
         if (coop::savexfer::receiving()) {
             unsigned __int64 got = coop::savexfer::recvBytes();
             unsigned __int64 tot = coop::savexfer::recvTotalBytes();
@@ -1246,6 +1544,16 @@ void coopPanelDrive(bool atTitle) {
         transfer = tb;
     }
     ps.transferDetail = transfer.empty() ? (const char*)0 : transfer.c_str();
+    // Saving and loading, told on the banner (in game it is the only place a
+    // player looks): a short notice, then a transfer's own progress.
+    if (g_noticeUntil != 0 && GetTickCount() < g_noticeUntil) {
+        detail = g_notice;
+        ostate = g_noticeState;
+    }
+    if (g_gameStarted && !transfer.empty() && rt.banner.empty()) {
+        detail = std::string("Co-op: ") + transfer;
+        ostate = 1;
+    }
 
     // Connected at the main menu but not playing yet. The HOST's game thread
     // only drains presence edges in game, so a friend already in shows only on
@@ -1783,7 +2091,7 @@ void tickCoordinatedSaveLoad(GameWorld* gw) {
         // save edges, folder-quiescence completion, paced in-band folder
         // transfer, staged+verified commit on the join.
         if (g_cfg.saveSync)
-            driveSaveSync();
+            driveSaveSync(gw);
         // Coordinated load (protocol 32): host-arbitrated load edges,
         // fingerprint-verified join follow, SaveXfer fallback on divergence.
         if (g_cfg.loadSync)
@@ -2220,7 +2528,22 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     // tick either way. Before first gameplay this is simply false (no caches
     // yet). driveLoadSync itself is NOT gated on this - it only touches net
     // packets + file IO + loadSave, never cached world pointers.
-    const bool worldLive = g_gameStarted && coop::engine::gameplayLive(gw);
+    // JOIN waiting in game for the host's copy of a load (NACK -> transfer):
+    // the host is already in the new world, this game still in the old one.
+    // Replicating now would stream the old world's characters (positions,
+    // inventory, wounds, deaths) into the host's freshly loaded one for the
+    // minutes a big save takes, and apply the host's to ours: hold it all,
+    // as during a load, until the copy lands and this game loads it too.
+    const bool awaitingCopy = !g_cfg.isHost && !g_loadAfterCommit.empty();
+    {
+        static bool s_wasAwaiting = false;
+        if (awaitingCopy != s_wasAwaiting) {
+            s_wasAwaiting = awaitingCopy;
+            coopLog(awaitingCopy ? "[load] waiting for the host's copy: replication paused"
+                                 : "[load] host's copy wait over: replication resumes");
+        }
+    }
+    const bool worldLive = g_gameStarted && coop::engine::gameplayLive(gw) && !awaitingCopy;
 
     // Build capture runs inside an engine factory call, not on our tick, so it
     // needs worldLive handed to it: a world load creates every building in the
@@ -2303,7 +2626,7 @@ void titleUpdate_hook(TitleScreen* self) {
     // -> no stream yet), and the save-receiver half still commits chunks to disk.
     if (g_net.isRunning() && !g_cfg.isHost && !g_gameStarted) {
         processNetEvents(0);
-        if (g_cfg.saveSync) driveSaveSync();
+        if (g_cfg.saveSync) driveSaveSync(0);
         if (g_cfg.loadSync && coop::engine::savesReady()) driveLoadSync(0);
         // F2 panel + status banner while the join waits at the menu (guarded; the
         // host's world is the destination, so we skip the config auto-load for a
