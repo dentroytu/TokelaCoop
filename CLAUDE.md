@@ -16,8 +16,12 @@ TokelaCoop no se activa y avisa.
 >   Releases publicadas: `v0.52` y `v0.53` (con el nombre KenshiCoop), `v0.54` (TokelaCoop, 2026-10-10, protocolo 57),
 >   `v0.55` (2026-10-17, protocolo 58), `v0.56` (2026-10-17, protocolo 59: despedir personajes), y con el mismo
 >   protocolo 59 `v0.57` (revisión de guardar y cargar), `v0.58` ("Volver a jugar con <amigo>"), `v0.59` (aviso de
->   versión nueva) y `v0.60` (abrir la partida a los amigos de Steam: "Unirse a la partida" desde su lista de amigos).
+>   versión nueva), `v0.60` (abrir la partida a los amigos de Steam: "Unirse a la partida" desde su lista de amigos) y
+>   `v0.61` (el despedido del amigo vaga en el juego del host, como en el suyo).
 > - **Verificado en el juego** (PC del autor del fork, Kenshi de Steam con RE_Kenshi):
+>   - v0.61 (2026-10-17): el host repite el despido del amigo con los paquetes de IA de "Wandering Squad"
+>     (`dismiss_sync`: `steps=5` y un paquete activo, 14499 o 2675), y sin ellos se queda sin paquete
+>     (`dismiss_ai_off`, el control);
 >   - v0.57 (2026-10-17): el amigo guarda y carga (`join_saveload`), la copia llega con el amigo en partida y la
 >     replicación en pausa (`load_stream`), el envío real al conectar (`stream_test.ps1`, 37 archivos, badCrc=0), y
 >     `save_sync`, `load_sync`, `money_persist`, `squad_persist`, `dismiss_sync`, `latejoin_sync`, `coop_presence`;
@@ -72,7 +76,7 @@ TokelaCoop no se activa y avisa.
 
 Flujo de trabajo:
 - una rama por cambio, PR y fusión cuando el CI está en verde;
-- las releases se publican con una etiqueta `vX.YY` (última: `v0.60`), que tiene que coincidir con
+- las releases se publican con una etiqueta `vX.YY` (última: `v0.61`), que tiene que coincidir con
   `TOKELACOOP_VERSION` de `src/netproto/Version.h` (el CI rechaza la etiqueta si no);
 - el dueño prefiere español y una UX muy sencilla.
 
@@ -305,6 +309,12 @@ powershell -ExecutionPolicy Bypass -File scripts\regress.ps1 -Tier full -SkipBui
     pasa a ser un NPC del host, el host contesta al amigo con `EVT_DISMISS_BIND` (su mano de NPC) para que el amigo
     mueva su cuerpo según el host y no aparezca un duplicado. `TOKELACOOP_DISMISS_SYNC=0` vuelve al comportamiento
     antiguo (el despedido volvía al recargar); pruebas `dismiss_sync` y `dismiss_sync_off`.
+    Desde la v0.61 `dismissBody` hace también lo que sigue en Kenshi: vacía las tareas del blackboard de la escuadra
+    nueva, le da los paquetes de IA de la plantilla (`Blackboard::addPackages`, que es lo que hace vagar al despedido)
+    y borra sus órdenes (`actions.clearAndDelete`, `clearSlaveJobs`). `addPackages` no está en nuestra `KenshiLib.lib`:
+    se pide a la `KenshiLib.dll` con `GetProcAddress` (la exporta desde RE_Kenshi 0.3.5; con una anterior falta y el
+    despedido queda como un NPC quieto, como antes). `steps=5` en la línea `RECV DISMISS` = con paquetes. Paquete
+    activo: `probeDismissedAi`; control negativo `dismiss_ai_off` (`TOKELACOOP_DISMISS_AI=0`, solo en el harness).
 - **Escenarios** (`src/plugin/test/`): solo en las configuraciones Harness y Debug (`TOKELACOOP_HARNESS`).
 
 ## Reglas al tocar código

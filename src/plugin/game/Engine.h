@@ -2196,6 +2196,10 @@ int probeDismiss(GameWorld* gw, const unsigned int hand[5], unsigned int post[5]
 bool probeFriendMember(GameWorld* gw, unsigned int outHand[5], char* outName, unsigned int nameCap);
 // The squad's names joined by '|' (as many as fit); returns the squad size.
 unsigned int probeSquadNames(GameWorld* gw, char* out, unsigned int cap);
+// The AI package the last body dismissed here (by the player or repeated from
+// the friend) runs now: its GameData stringID in sid, its hand in hand. 3 found,
+// 2 no current package, 1 no blackboard, 0 body not found, -1 no dismissal yet.
+int probeDismissedAi(GameWorld* gw, unsigned int hand[5], char* sid, unsigned int sidCap);
 #endif
 
 // SEH-guarded probe lever (squad_probe): programmatically MOVE the member at

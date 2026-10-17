@@ -229,6 +229,7 @@ function Invoke-OneOracle {
         "squad_persist_off" { return (Test-SquadPersist -HostFile $HostLog -JoinFile $JoinLog -ExpectLoss -GateName "squad_persist_off") }
         "dismiss_sync"      { return (Test-DismissSync  -HostFile $HostLog -JoinFile $JoinLog) }
         "dismiss_sync_off"  { return (Test-DismissSync  -HostFile $HostLog -JoinFile $JoinLog -ExpectLeak -GateName "dismiss_sync_off") }
+        "dismiss_ai_off"    { return (Test-DismissSync  -HostFile $HostLog -JoinFile $JoinLog -ExpectNoAi -GateName "dismiss_ai_off") }
         "trade_burst"   { return (Test-TradeBurst      -HostFile $HostLog -JoinFile $JoinLog) }
         "drop_probe"    { return (Test-DropProbe       -HostFile $HostLog) }
         "wi_sync"       { return (Test-WorldItemSync   -HostFile $HostLog -JoinFile $JoinLog -Tol $Tolerance) }

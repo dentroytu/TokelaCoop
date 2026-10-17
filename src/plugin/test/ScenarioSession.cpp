@@ -1091,7 +1091,7 @@ public:
     explicit DismissSyncScenario(const char* name)
         : TimedScenario(name, 0), recruitedA_(false), recruitedB_(false), okA_(false), okB_(false),
           preDone_(false), dismissed_(false), dismissOk_(false), killed_(false), refuseTried_(false),
-          saveIssued_(false), saveOk_(false), ackSeen_(false), ackOk_(false),
+          aiProbed_(false), saveIssued_(false), saveOk_(false), ackSeen_(false), ackOk_(false),
           loadIssued_(false), loadOk_(false), sigWas2_(false), swapDone_(false),
           reportedAtMs_(0), dropStartMs_(0), sigClearedMs_(0), lastStatusMs_(0), ackBase_(0), ackFails_(0) {
         memset(handA_, 0, sizeof(handA_));
@@ -1156,6 +1156,19 @@ public:
             char b[160];
             _snprintf(b, sizeof(b) - 1, "SCENARIO DSM kill which=B ok=%d hand=%u,%u,%u,%u,%u t=%lu",
                       ok ? 1 : 0, handB_[0], handB_[1], handB_[2], handB_[3], handB_[4], ctx.elapsedMs);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+        }
+        // Both: the AI package the dismissed body runs (v0.61). The join's is
+        // Kenshi's own dismissal; the host's is dismissBody repeating it - they
+        // must match (a plain NPC with no package stands still forever).
+        if (!aiProbed_ && live && ctx.elapsedMs >= AIPKG_AT_MS) {
+            aiProbed_ = true;
+            unsigned int h[5] = { 0, 0, 0, 0, 0 };
+            char sid[96] = "";
+            const int rc = engine::probeDismissedAi(ctx.gw, h, sid, sizeof(sid));
+            char b[224];
+            _snprintf(b, sizeof(b) - 1, "SCENARIO DSM aipkg role=%s rc=%d hand=%u,%u,%u,%u,%u pkg='%s' t=%lu",
+                      ctx.isHost ? "host" : "join", rc, h[0], h[1], h[2], h[3], h[4], sid, ctx.elapsedMs);
             b[sizeof(b) - 1] = '\0'; coop::logLine(b);
         }
         // HOST: save (streamed to the join), then load it.
@@ -1230,6 +1243,7 @@ private:
     static const unsigned long DISMISS_AT_MS    = 19000;
     static const unsigned long REFUSE_AT_MS     = 21000;
     static const unsigned long KILL_AT_MS       = 23000;
+    static const unsigned long AIPKG_AT_MS      = 30000;   // the packages had time to start
     static const unsigned long SAVE_AT_MS       = 34000;
     static const unsigned long SWAP_MIN_MS      = 400;
     static const unsigned long SYNC_CONFIRM_MS  = 3000;
@@ -1272,6 +1286,7 @@ private:
     }
 
     bool          recruitedA_, recruitedB_, okA_, okB_, preDone_, dismissed_, dismissOk_, killed_, refuseTried_;
+    bool          aiProbed_;
     bool          saveIssued_, saveOk_, ackSeen_, ackOk_, loadIssued_, loadOk_;
     bool          sigWas2_, swapDone_;
     unsigned long reportedAtMs_, dropStartMs_, sigClearedMs_, lastStatusMs_;
@@ -1836,6 +1851,7 @@ Scenario* makeSessionScenario(const std::string& name) {
     if (name == "squad_persist_off") return new SquadPersistScenario("squad_persist_off");
     if (name == "dismiss_sync")      return new DismissSyncScenario("dismiss_sync");
     if (name == "dismiss_sync_off")  return new DismissSyncScenario("dismiss_sync_off");
+    if (name == "dismiss_ai_off")    return new DismissSyncScenario("dismiss_ai_off");
     if (name == "join_saveload")     return new JoinSaveLoadScenario();
     if (name == "money_persist")  return new MoneyPersistScenario();
     return 0;

@@ -925,7 +925,11 @@ function Test-DismissSync {
     # A is in neither squad.
     # -ExpectLeak (dismiss_sync_off, TOKELACOOP_DISMISS_SYNC=0): A must come back
     # in the host's squad after the reload - the bug, so the gate can fail.
-    param([string]$HostFile, [string]$JoinFile, [switch]$ExpectLeak, [string]$GateName = "dismiss_sync")
+    # -ExpectNoAi (dismiss_ai_off, TOKELACOOP_DISMISS_AI=0): the host repeats the
+    # dismissal without the AI packages (steps=4), so its body must NOT run the
+    # package Kenshi gives on the join - or the AI check cannot fail.
+    param([string]$HostFile, [string]$JoinFile, [switch]$ExpectLeak, [switch]$ExpectNoAi,
+          [string]$GateName = "dismiss_sync")
     $why = @()
     $legs = {
         param($f, $role)
@@ -976,6 +980,7 @@ function Test-DismissSync {
     $sends = @(Select-String -Path $JoinFile -Pattern "\[squad\] DISMISS send old=(\d+,\d+,\d+,\d+,\d+) ")
     $kb = Select-String -Path $JoinFile -Pattern "SCENARIO DSM kill which=B ok=1 hand=(\d+,\d+,\d+,\d+,\d+)" | Select-Object -Last 1
     $handB = if ($kb) { $kb.Matches[0].Groups[1].Value } else { '' }
+    $pkgH = ''; $pkgJ = ''
 
     if ($ExpectLeak) {
         if ($sends.Count -gt 0) { $why += "dismissal sync is off, yet the join sent DISMISS" }
@@ -989,6 +994,10 @@ function Test-DismissSync {
             $recv = Select-String -Path $HostFile -Pattern ("\[squad\] RECV DISMISS old=" + [regex]::Escape($oldA) + " ok=(\d) steps=(\d)") | Select-Object -Last 1
             if (-not $recv) { $why += "host never received the DISMISS for $oldA" }
             elseif ($recv.Matches[0].Groups[1].Value -ne '1') { $why += "host could not repeat the dismissal (steps=$($recv.Matches[0].Groups[2].Value))" }
+            elseif ($ExpectNoAi) {
+                if ($recv.Matches[0].Groups[2].Value -ne '4') { $why += "AI packages are off, yet the host's repeat reports steps=$($recv.Matches[0].Groups[2].Value) (want 4)" }
+            }
+            elseif ($recv.Matches[0].Groups[2].Value -ne '5') { $why += "host repeated the dismissal without the wandering AI (steps=$($recv.Matches[0].Groups[2].Value); 5 = with it)" }
             $p = $oldA -split ','
             $bind = Select-String -Path $JoinFile -Pattern ("\[squad\] RECV DISMISS-BIND old=" + $p[3] + "," + $p[4] + " npc=\S+ bound=1") | Select-Object -Last 1
             if (-not $bind) { $why += "join never bound A's body to the host's NPC (no BIND)" }
@@ -998,14 +1007,38 @@ function Test-DismissSync {
         }
         if ($hHas) { $why += "'$nameA' is back in the host's squad after the reload" }
         if ($jHas) { $why += "'$nameA' is back in the join's squad after the reload" }
+        # v0.61: the host's repeat gives the body the "Wandering Squad" AI packages,
+        # as Kenshi's own dismissal does on the join - not a plain NPC. Which of
+        # them runs at a given moment varies (2675 or 14499 seen, even between the
+        # two sides of one run), so the check is that one runs; the two names are
+        # only reported.
+        $aiLine = {
+            param($f, $role)
+            Select-String -Path $f -Pattern "SCENARIO DSM aipkg role=$role rc=(-?\d+) hand=\S+ pkg='(.*?)'" | Select-Object -Last 1
+        }
+        $ah = & $aiLine $HostFile 'host'
+        $aj = & $aiLine $JoinFile 'join'
+        $rcH = if ($ah) { $ah.Matches[0].Groups[1].Value } else { '?' }
+        $rcJ = if ($aj) { $aj.Matches[0].Groups[1].Value } else { '?' }
+        if ($ah) { $pkgH = $ah.Matches[0].Groups[2].Value }
+        if ($aj) { $pkgJ = $aj.Matches[0].Groups[2].Value }
+        if ($rcJ -ne '3') { $why += "join: no AI package on Kenshi's own dismissal to compare with (rc=$rcJ)" }
+        if ($ExpectNoAi) {
+            if ($rcH -eq '3') {
+                $why += "without the AI packages the host's body still runs '$pkgH': the AI check proves nothing"
+            }
+        }
+        elseif ($rcH -ne '3') { $why += "host: the repeated dismissal left the body with no AI package (rc=$rcH)" }
     }
     $ok = ($why.Count -eq 0)
     Write-Host ("  DISMISS-SYNC " + $(if ($ok) { "PASS" } else { "FAIL" }) +
                 " - A='$nameA' via=$via sends=$($sends.Count); after reload host has A=$hHas, join has A=$jHas; refused '$friend'" +
+                $(if ($pkgH -or $pkgJ) { "; AI package host='$pkgH' join='$pkgJ'" } else { "" }) +
                 $(if ($ExpectLeak) { " (negative control: the host should keep A)" } else { "" }) +
+                $(if ($ExpectNoAi) { " (negative control: the host's body without the AI packages)" } else { "" }) +
                 $(if (-not $ok) { " - " + ($why -join '; ') } else { "" }))
     return (Add-GateResult -Name $GateName -Status $(if ($ok) { "PASS" } else { "FAIL" }) `
-                -Metrics @{ via = $via; sends = $sends.Count; hostHasA = $hHas; joinHasA = $jHas } `
+                -Metrics @{ via = $via; sends = $sends.Count; hostHasA = $hHas; joinHasA = $jHas; aiHost = $pkgH; aiJoin = $pkgJ } `
                 -Detail ($why -join '; '))
 }
 

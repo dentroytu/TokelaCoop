@@ -29,6 +29,7 @@ $script:CoopDiagEnvKeys = @(
     'TOKELACOOP_TAB_LEDGER'
     'TOKELACOOP_ROLE_VIA_UI'
     'TOKELACOOP_DISMISS_SYNC'
+    'TOKELACOOP_DISMISS_AI'      # harness only (EngineDismiss.cpp): dismiss_ai_off
     'TOKELACOOP_XFER_SYNC'
     'TOKELACOOP_BLOCK_XFER'
     'TOKELACOOP_WORLD_SYNC'
