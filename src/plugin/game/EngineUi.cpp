@@ -876,6 +876,11 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
         status = st->isHost ? L("Esperando a tu amigo...", "Waiting for your friend...")
                             : L("Conectando con tu amigo...", "Connecting to your friend...");
         statusCol = COL_AMBER;
+        // Started from "Play again with <name>": say what the other side does.
+        if (st->lastFriendId != 0 && st->peerSteamId == st->lastFriendId &&
+            st->lastFriendName && st->lastFriendName[0])
+            waitLine = std::string(L("Que ", "Ask ")) + st->lastFriendName +
+                       L(" pulse \xC2\xABVolver a jugar\xC2\xBB en su F2.", " to press \"Play again\" in their F2.");
     } else {
         status = L("Sin conectar", "Not connected");
         statusCol = COL_RED;

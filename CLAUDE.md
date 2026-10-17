@@ -15,7 +15,7 @@ TokelaCoop no se activa y avisa.
 > - Compilación verificada en CI (`windows-2022`): `prototest`, `tunneltest`, DLL Harness y Release, y kit con instalador.
 >   Releases publicadas: `v0.52` y `v0.53` (con el nombre KenshiCoop), `v0.54` (TokelaCoop, 2026-10-10, protocolo 57),
 >   `v0.55` (2026-10-17, protocolo 58), `v0.56` (2026-10-17, protocolo 59: despedir personajes) y `v0.57`
->   (2026-10-17, mismo protocolo 59: revisión de guardar y cargar).
+>   (2026-10-17, mismo protocolo 59: revisión de guardar y cargar) y `v0.58` (protocolo 59: "Volver a jugar con <amigo>").
 > - **Verificado en el juego** (PC del autor del fork, Kenshi de Steam con RE_Kenshi):
 >   - v0.57 (2026-10-17): el amigo guarda y carga (`join_saveload`), la copia llega con el amigo en partida y la
 >     replicación en pausa (`load_stream`), el envío real al conectar (`stream_test.ps1`, 37 archivos, badCrc=0), y
@@ -73,7 +73,7 @@ TokelaCoop no se activa y avisa.
 
 Flujo de trabajo:
 - una rama por cambio, PR y fusión cuando el CI está en verde;
-- las releases se publican con una etiqueta `vX.YY` (última: `v0.57`), que tiene que coincidir con
+- las releases se publican con una etiqueta `vX.YY` (última: `v0.58`), que tiene que coincidir con
   `TOKELACOOP_VERSION` de `src/netproto/Version.h` (el CI rechaza la etiqueta si no);
 - el dueño prefiere español y una UX muy sencilla.
 
@@ -261,6 +261,11 @@ powershell -ExecutionPolicy Bypass -File scripts\regress.ps1 -Tier full -SkipBui
   - nombres: `saveNameSafe` (46 bytes como mucho, sin rutas ni dispositivos); un nombre demasiado largo se avisa
     en el banner (`showNotice`), igual que "guardando...", "partida guardada" y "no se pudo guardar";
   - prueba `join_saveload`: el amigo guarda y luego carga.
+- **"Volver a jugar con <amigo>"** (v0.58, `core/LastFriend.h`, botón `ACT_REJOIN` de `game/EngineUi.cpp`): en cada
+  conexión por Steam se guarda el otro jugador (steamid64, nombre de Steam y nuestro rol) en
+  `%LOCALAPPDATA%\kenshi\TokelaCoop_amigo.txt`; sin conectar, F2 ofrece el botón, que hace la conexión manual por
+  Steam con esos datos (el host espera a ese amigo, el amigo se conecta a ese host). Probado en el juego con un
+  amigo de prueba (aparece, conecta como host al ID guardado, "Cancelar" vuelve al botón).
 - **Autoridad:** el host es autoritativo del mundo (NPCs, facciones, tiempo, dinero, edificios);
   cada cliente lo es de **su propio squad**. Las acciones sobre cosas que no posees viajan como
   *intents* (p. ej. `PKT_INV_XFER`) al dueño.
