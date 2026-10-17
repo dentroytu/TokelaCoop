@@ -18,6 +18,11 @@ INSTALAR (los dos jugadores) - en español
   (el anfitrión pulsa F2 > "Invitar a un amigo de Steam"). Las siguientes
   veces, los dos pulsáis F2 > "Volver a jugar con <amigo>".
 
+  VERSIONES NUEVAS: al abrir Kenshi, TokelaCoop pregunta a GitHub cuál es la
+  última versión (solo eso) y, si hay una más nueva, F2 lo dice y trae un botón
+  para descargarla. Instaladla los dos. Para que no pregunte nunca, pon
+  "checkUpdates": false en mods\TokelaCoop\coop_config.json.
+
   ¿ALGO VA MAL? Doble clic en "Recoger diagnostico.cmd": deja en el Escritorio
   un zip con los logs, la lista de mods y las versiones (no tus partidas; los
   logs llevan tu Steam ID y el de tu amigo). Mándaselo a quien te ayude. Los

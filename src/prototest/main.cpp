@@ -37,6 +37,7 @@
 #include "../plugin/core/TextWrap.h" // F2 panel: one row per wrapped line
 #include "../plugin/core/Inbound.h" // Phase 0 queue-lifecycle fixes (header-only)
 #include "../plugin/core/LastFriend.h" // "Volver a jugar con <amigo>" (header-only)
+#include "../plugin/core/UpdateCheck.h" // new-version notice: version + JSON parsing
 #include "../plugin/core/TabLedger.h" // v0.54: squad-tab owners kept with the save
 #include "../plugin/game/EngineFaults.h" // Phase 5c: fault throttle (pure inline)
 #include "../plugin/game/EngineCaps.h"   // Phase 5d: capability registry (pure inline)
@@ -818,6 +819,30 @@ static int xferRun(const char* name, const XferSrcFile* srcs, unsigned nsrc,
     dh.fileCount = (u16)nsrc;
     u16 of = 0; unsigned __int64 ob = 0;
     return savexfer::onSaveDone(dh, crcs.empty() ? (const u32*)0 : &crcs[0], &of, &ob);
+}
+
+// New-version notice: reading versions and GitHub's latest-release answer.
+static void testUpdateCheck() {
+    std::printf("== new-version notice (version + release JSON) ==\n");
+    CHECK("version: v0.58", update::versionKey("v0.58") == 58);
+    CHECK("version: 0.58 without v", update::versionKey("0.58") == 58);
+    CHECK("version: v1.02", update::versionKey("v1.02") == 1002);
+    CHECK("version: not a version", update::versionKey("latest") == -1);
+    CHECK("version: trailing junk", update::versionKey("v0.58-rc1") == -1);
+    CHECK("version: no minor", update::versionKey("v1.") == -1);
+    CHECK("newer: v0.59 over 0.58", update::isNewer("v0.59", "0.58"));
+    CHECK("newer: v1.00 over 0.99", update::isNewer("v1.00", "0.99"));
+    CHECK("not newer: same", !update::isNewer("v0.58", "0.58"));
+    CHECK("not newer: older", !update::isNewer("v0.57", "0.58"));
+    CHECK("not newer: garbage tag", !update::isNewer("v9.x", "0.58"));
+    const std::string body =
+        "{\"url\":\"https://api.github.com/repos/dentroytu/TokelaCoop/releases/1\","
+        "\"tag_name\": \"v0.59\",\"name\":\"TokelaCoop v0.59\",\"assets\":[]}";
+    CHECK("json: tag_name found", update::tagFromReleaseJson(body) == "v0.59");
+    CHECK("json: no tag_name", update::tagFromReleaseJson("{\"message\":\"Not Found\"}").empty());
+    CHECK("json: odd tag refused", update::tagFromReleaseJson("{\"tag_name\":\"v0.59<script>\"}").empty());
+    CHECK("download page is the latest release",
+          std::string(update::downloadPage()) == "https://github.com/dentroytu/TokelaCoop/releases/latest");
 }
 
 // "Volver a jugar con <amigo>": the remembered friend's text file.
@@ -2287,6 +2312,7 @@ int main() {
     testFolderFingerprint();
     testSaveNames();
     testLastFriend();
+    testUpdateCheck();
     testSaveXferRoundTrip();
     testContentHash();
     testInterp();
