@@ -15,7 +15,8 @@ INSTALAR (los dos jugadores) - en español
      Si tenías KenshiCoop (el nombre antiguo, hasta la v0.53), lo cambia por
      TokelaCoop y conserva tu coop_config.json.
   Para actualizar, descarga el zip nuevo y repite. Para jugar: mira PLAY abajo
-  (el anfitrión pulsa F2 > "Invite a Steam friend").
+  (el anfitrión pulsa F2 > "Invitar a un amigo de Steam"). Las siguientes
+  veces, los dos pulsáis F2 > "Volver a jugar con <amigo>".
 
   ¿ALGO VA MAL? Doble clic en "Recoger diagnostico.cmd": deja en el Escritorio
   un zip con los logs, la lista de mods y las versiones (no tus partidas; los
@@ -67,6 +68,10 @@ PLAY (Steam - recommended)
   friend", then clicks "Invite <name>" next to the friend. The friend
   accepts the Steam notification and both sides connect on their own.
   If that doesn't work, use the manual steps below.
+
+  NEXT TIME / LA PRÓXIMA VEZ: F2 remembers your friend. Both of you press
+  "Volver a jugar con <amigo>" ("Play again with <friend>"): the host waits for
+  that friend and the friend connects - no invite, no Steam IDs.
 
   1. Press F2 to open the Co-op panel. It works at the MAIN MENU (before loading
      a game) as well as in-game.

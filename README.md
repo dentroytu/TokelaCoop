@@ -1,9 +1,9 @@
 # TokelaCoop
 
-**Current version: v0.57.** Up to v0.53 this project was called **KenshiCoop**.
+**Current version: v0.58.** Up to v0.53 this project was called **KenshiCoop**.
 TokelaCoop is a modified fork of [nhoral/KenshiCoop](https://github.com/nhoral/KenshiCoop).
 In game, the top-left banner and the F2 panel title show the name and the
-version ("TokelaCoop v0.57"): check that you and your friend see the same one.
+version ("TokelaCoop v0.58"): check that you and your friend see the same one.
 
 Setup + Demo (upstream KenshiCoop): [https://www.youtube.com/watch?v=OqwVRRZEYGM](https://www.youtube.com/watch?v=OqwVRRZEYGM)
 
@@ -108,6 +108,12 @@ fine). You load your save, press **F2** and click **"Invite a Steam friend"**.
 Then click **"Invite <name>"** next to your friend. Your friend accepts the
 Steam notification, and both sides connect on their own. You host, and nobody
 copies an ID. If that doesn't work, use the manual steps below.
+
+**Next time: "Volver a jugar con <amigo>" / "Play again with <friend>" (v0.58).**
+After a Steam session, F2 remembers your friend (in
+`%LOCALAPPDATA%\kenshi\TokelaCoop_amigo.txt`). Both of you press that button: the
+host goes online waiting for that friend and the friend connects to that host -
+no invite, no Steam IDs.
 
 1. Press **F2** to open the Co-op panel.
 2. **Swap Steam IDs.** Each player clicks **"Copy my Steam ID"** and sends it to

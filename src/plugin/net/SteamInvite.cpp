@@ -476,6 +476,18 @@ bool pickerActive()            { return g_picker; }
 int  friendCount()             { return g_friendN; }
 SteamId friendId(int i)        { return (i >= 0 && i < g_friendN) ? g_friendRows[i].id : 0; }
 const char* friendName(int i)  { return (i >= 0 && i < g_friendN) ? g_friendRows[i].name : ""; }
+
+const char* personaName(SteamId id) {
+    static char s_name[96];
+    s_name[0] = '\0';
+    if (!g_ready || !g_frName || !g_friends || id == 0) return s_name;
+    const char* nm = g_frName(g_friends, id);
+    if (nm) {
+        strncpy(s_name, nm, sizeof(s_name) - 1);
+        s_name[sizeof(s_name) - 1] = '\0';
+    }
+    return s_name;
+}
 int  friendState(int i)        { return (i >= 0 && i < g_friendN) ? g_friendRows[i].state : 0; }
 
 void tick() {
