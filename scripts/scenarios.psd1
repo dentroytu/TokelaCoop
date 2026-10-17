@@ -2202,6 +2202,19 @@
             Advisory = @('smoothness', 'anim_truth', 'march')
             Tier = 'full'; WanVariant = $false
         }
+        # dismiss_ai_off: the negative control of dismiss_sync's AI check (v0.61).
+        # TOKELACOOP_DISMISS_AI=0 makes the host repeat the dismissal without
+        # Blackboard::addPackages (as up to v0.60): the host's body must then NOT
+        # run the AI package Kenshi's own dismissal gives on the join.
+        dismiss_ai_off = @{
+            DiagEnv = @{ TOKELACOOP_DISMISS_AI = '0' }
+            Save = 'sync'; Setup = ''; Tolerance = 6.0
+            Seconds = 200; KillGraceSec = 170
+            PrimaryGate = 'dismiss_ai_off'
+            Gating   = @('dismiss_ai_off')
+            Advisory = @()
+            Tier = 'probe'; WanVariant = $false
+        }
         dismiss_sync_off = @{
             DiagEnv = @{ TOKELACOOP_DISMISS_SYNC = '0' }
             Save = 'sync'; Setup = ''; Tolerance = 6.0

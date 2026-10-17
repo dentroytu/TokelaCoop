@@ -113,7 +113,9 @@ PLAY (Steam - recommended)
   Squads either of you creates or hires into later stay with whoever made them,
   also after saving and loading. Dismissing one of your characters (squad
   screen) dismisses it in both games, also after saving and loading; you cannot
-  dismiss your friend's characters.
+  dismiss your friend's characters. The dismissed character wanders off in both
+  games (since v0.61; needs RE_Kenshi 0.3.5 or newer, which the installer puts
+  in when RE_Kenshi is missing).
 
 PLAY (LAN / direct UDP - advanced)
 ----------------------------------

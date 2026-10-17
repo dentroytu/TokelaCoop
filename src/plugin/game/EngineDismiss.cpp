@@ -10,13 +10,17 @@
 // Kenshi has no engine call that dismisses a character outside the squad screen:
 // SquadManagementScreen::dismissCharacter(2) does it inline (disassembled for
 // Steam 1.0.65): move the body to the "Adventurers Guild" faction (or an empty
-// one), into a new "Wandering Squad" platoon at its position, unselect it and
-// clear its player jobs. dismissBody repeats those calls; the hook on
+// one), into a new "Wandering Squad" platoon at its position, unselect it, give
+// it that squad's AI packages (the wandering) and clear its player jobs and
+// orders. dismissBody repeats those calls; the hook on
 // dismissCharacter tells the replicator about a local dismissal (and refuses one
 // of the friend's characters - a second barrier behind the squad-screen drag
 // guard). Every engine read and call is SEH-guarded on the main thread.
 
 #include "EngineInternal.h"
+#include <kenshi/AI/AI.h>
+#include <kenshi/AI/AITaskSystem.h>
+#include <kenshi/AI/Blackboard.h>
 #include <kenshi/gui/SquadManagementScreen.h>
 #include <kenshi/Faction.h>
 #include <kenshi/GameDataManager.h>
@@ -49,13 +53,24 @@ typedef Platoon*    (__fastcall* NewPlatoonFn)(Faction* self, GameData* squadTem
                                                bool permanent, const Ogre::Vector3* p);
 typedef GameData*   (__fastcall* GdGetFn)(GameDataContainer* self, const std::string* sid);
 typedef void        (__fastcall* CharVoidFn)(Character* self);
+typedef void        (__fastcall* AddPackagesFn)(Blackboard* self, GameData* packageCollection);
+typedef AIPackage*  (__fastcall* CurPackageFn)(Blackboard* self);
 
 DismissCharFn g_dismissOrig       = 0;
 EmptyFacFn    g_emptyFacFn        = 0;
 NewPlatoonFn  g_newPlatoonFn      = 0;
 GdGetFn       g_gdGetFn           = 0;
 CharVoidFn    g_clearPermajobsFn  = 0;
+AddPackagesFn g_addPackagesFn     = 0;
+CurPackageFn  g_curPackageFn      = 0;   // diagnostics (harness probe)
 bool          g_dismissResolved   = false;
+unsigned int  g_lastDismissed[5]  = { 0, 0, 0, 0, 0 };   // hand of the last dismissed body
+bool          g_haveLastDismissed = false;
+
+void noteDismissed(const unsigned int h[5]) {
+    for (int i = 0; i < 5; ++i) g_lastDismissed[i] = h[i];
+    g_haveLastDismissed = true;
+}
 
 DismissOwnerFn            g_dismissOwner = 0;   // 0 unknown, 1 ours, 2 the friend's
 bool                      g_dismissTrack = true;
@@ -97,6 +112,7 @@ void __fastcall dismissCharacter_hook(SquadManagementScreen* self, int result) {
     DismissEdge e;
     for (int i = 0; i < 5; ++i) { e.before[i] = pre[i]; e.after[i] = 0; }
     readObjectHand(reinterpret_cast<RootObject*>(c), e.after);
+    noteDismissed(e.after);
     e.c = c;
     if (g_dismissEdges.size() < 16) g_dismissEdges.push_back(e);
 }
@@ -109,12 +125,33 @@ void resolveDismissFns() {
     g_gdGetFn = (GdGetFn)KenshiLib::GetRealAddress(
         static_cast<GameData* (GameDataContainer::*)(const std::string&)>(&GameDataContainer::getData));
     g_clearPermajobsFn = (CharVoidFn)KenshiLib::GetRealAddress(&Character::clearPermajobs);
-    // (Blackboard::addPackages - the wandering AI packages Kenshi adds - is not
-    // exported by KenshiLib: the dismissed body is left a plain NPC.)
+    // Blackboard::addPackages (the wandering AI packages Kenshi gives a dismissed
+    // body) is not in our link library, but KenshiLib.dll exports it from
+    // RE_Kenshi 0.3.5 on. The export is a jump through KenshiLib's own address
+    // table, so it is called like any linked function. With an older RE_Kenshi
+    // it is missing and the body is left a plain NPC, as before v0.61.
+    HMODULE klib = GetModuleHandleA("KenshiLib.dll");
+    if (klib) {
+        g_addPackagesFn = (AddPackagesFn)GetProcAddress(klib, "?addPackages@Blackboard@@QEAAXPEAVGameData@@@Z");
+        g_curPackageFn  = (CurPackageFn)GetProcAddress(klib, "?getCurrentPackage@Blackboard@@QEAAPEAVAIPackage@@XZ");
+    }
+#ifdef TOKELACOOP_HARNESS
+    // dismiss_ai_off (negative control): TOKELACOOP_DISMISS_AI=0 repeats a
+    // dismissal without the packages, as up to v0.60.
+    const char* aiEnv = getenv("TOKELACOOP_DISMISS_AI");
+    if (aiEnv && aiEnv[0] == '0') {
+        g_addPackagesFn = 0;
+        coop::logLine("[squad] dismiss: AI packages off (TOKELACOOP_DISMISS_AI=0)");
+        return;
+    }
+#endif
+    coop::logLine(g_addPackagesFn ? "[squad] dismiss: Blackboard::addPackages found"
+                                  : "[squad] dismiss: Blackboard::addPackages missing (RE_Kenshi < 0.3.5)");
 }
 
 // The engine half of dismissBody: plain data only (no C++ object needing
-// unwinding may live in an SEH frame). 'steps' reports how far it got.
+// unwinding may live in an SEH frame). 'steps' reports how far it got: 4 done,
+// 5 done and the body got the "Wandering Squad" AI packages.
 bool dismissBodySeh(GameWorld* gw, Character* c, const std::string* facSid,
                     const std::string* squadSid, unsigned int post[5], int* steps) {
     *steps = 0;
@@ -130,14 +167,37 @@ bool dismissBodySeh(GameWorld* gw, Character* c, const std::string* facSid,
         c->setFaction(f, 0);
         *steps = 2;
         GameData* squad = g_gdGetFn ? g_gdGetFn(static_cast<GameDataContainer*>(&gw->gamedata), squadSid) : 0;
+        bool moved = false;
         if (squad && g_newPlatoonFn) {
             Ogre::Vector3 pos = c->getPosition();
             Platoon* p = g_newPlatoonFn(f, squad, true, &pos);
-            if (p && p->activePlatoon) p->activePlatoon->addActiveObject(obj);
+            if (p && p->activePlatoon) { p->activePlatoon->addActiveObject(obj); moved = true; }
             *steps = 3;
         }
-        if (g_clearPermajobsFn) g_clearPermajobsFn(c);
-        *steps = 4;
+        // Kenshi's next steps, in its order: the new squad's blackboard drops
+        // the old squad's jobs and takes the template's AI packages, then the
+        // body's own orders go. Only once it is in the new squad: before that
+        // the blackboard is still the player squad's.
+        bool wander = false;
+        AI* ai = c->ai;
+        if (moved && ai) {
+            Blackboard* bb = ai->getBlackboard();
+            if (bb) {
+                bb->_flagCleared = true;
+                bb->leaderJobs.clear();
+                bb->squadJobs.clear();
+                bb->squadJobs2.clear();
+                bb->slaveJobs.clear();
+                if (g_addPackagesFn) { g_addPackagesFn(bb, squad); wander = true; }
+            }
+        }
+        if (g_clearPermajobsFn) g_clearPermajobsFn(c);   // = ai->taskSystemAI->clearPermajobs()
+        AITaskSytem* ts = ai ? ai->taskSystemAI : 0;
+        if (ts) {
+            ts->actions.clearAndDelete();
+            ts->clearSlaveJobs();
+        }
+        *steps = wander ? 5 : 4;
         readObjectHand(obj, post);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -183,6 +243,7 @@ bool dismissBody(GameWorld* gw, Character* c, unsigned int post[5], int* steps) 
     const bool ok = dismissBodySeh(gw, c, &facSid, &squadSid, post, &s);
     if (steps) *steps = s;
     if (s >= 2) ignoreRosterChar(c);   // it left the player faction
+    if (ok) noteDismissed(post);
     return ok;
 }
 
@@ -308,6 +369,38 @@ unsigned int probeSquadNames(GameWorld* gw, char* out, unsigned int cap) {
         out[len] = '\0';
     }
     return n;
+}
+
+namespace {
+// Plain data only: the SEH half of probeDismissedAi.
+int dismissedAiSeh(Character* c, char* sid, unsigned int sidCap) {
+    __try {
+        if (!c) return 0;
+        AI* ai = c->ai;
+        Blackboard* bb = ai ? ai->getBlackboard() : 0;
+        if (!bb) return 1;
+        AIPackage* p = g_curPackageFn ? g_curPackageFn(bb) : 0;
+        // AIPackage::packageData (0x68 in AIPackage.h, which does not compile
+        // next to Blackboard.h: both define BlackboardSignalFunctions).
+        GameData* d = p ? *reinterpret_cast<GameData**>(reinterpret_cast<char*>(p) + 0x68) : 0;
+        if (!d) return 2;
+        strncpy(sid, d->stringID.c_str(), sidCap - 1);
+        sid[sidCap - 1] = '\0';
+        return 3;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+} // namespace
+
+int probeDismissedAi(GameWorld* gw, unsigned int hand[5], char* sid, unsigned int sidCap) {
+    for (int i = 0; i < 5; ++i) hand[i] = g_lastDismissed[i];
+    if (sid && sidCap) sid[0] = '\0';
+    if (!gw || !sid || sidCap < 2) return 0;
+    if (!g_haveLastDismissed) return -1;
+    resolveDismissFns();
+    Character* c = resolveCharByHand(hand[3], hand[4], hand[0], hand[1], hand[2]);
+    return dismissedAiSeh(c, sid, sidCap);
 }
 #endif
 
