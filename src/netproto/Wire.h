@@ -25,7 +25,7 @@ typedef double         f64;
 // this header stays a definition file. When you bump PROTOCOL_VERSION, add the
 // matching entry at the bottom of that doc. The version is checked at handshake
 // and a mismatch is rejected (no back-compat).
-const u16 PROTOCOL_VERSION = 58;
+const u16 PROTOCOL_VERSION = 59;
 
 // Packet type tags (first byte of every packet).
 enum PacketType {
@@ -122,7 +122,20 @@ enum EventType {
     // index/serial do not survive). An all-zero actor = the body LEFT the
     // roster (dismissal). The receiver shares the EVT_RECRUIT re-key path
     // and pins the new hand as peer-owned (rank reshuffle cannot flip it).
-    EVT_SQUAD_MOVE = 11
+    EVT_SQUAD_MOVE = 11,
+    // Dismissal (protocol 59). A death and a dismissal both leave the roster
+    // with a zeroed EVT_SQUAD_MOVE, so the receiver could only drop its pins and
+    // the host's save brought a dismissed friend's character back. subject = the
+    // body's hand before the dismissal; actor = its hand afterwards (the
+    // "Wandering Squad" NPC) when the HOST dismissed, zero when the friend did.
+    // The receiver repeats Kenshi's dismissal on its copy (never on a dead body
+    // or one of its own).
+    EVT_DISMISS = 12,
+    // Host -> friend reply to a friend's EVT_DISMISS: subject = the same old
+    // hand, actor = the NPC hand the host's copy has now, so the friend's own
+    // dismissed body binds to the host's NPC stream instead of getting a
+    // duplicate.
+    EVT_DISMISS_BIND = 13
 };
 
 // Sentinel ownerId meaning "all remote peers" (used on local disconnect to sweep

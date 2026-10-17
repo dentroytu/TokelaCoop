@@ -225,6 +225,8 @@ function Invoke-OneOracle {
         "own_guard_off" { return (Test-OwnGuard        -HostFile $HostLog -JoinFile $JoinLog -ExpectLeak -GateName "own_guard_off") }
         "squad_persist"     { return (Test-SquadPersist -HostFile $HostLog -JoinFile $JoinLog) }
         "squad_persist_off" { return (Test-SquadPersist -HostFile $HostLog -JoinFile $JoinLog -ExpectLoss -GateName "squad_persist_off") }
+        "dismiss_sync"      { return (Test-DismissSync  -HostFile $HostLog -JoinFile $JoinLog) }
+        "dismiss_sync_off"  { return (Test-DismissSync  -HostFile $HostLog -JoinFile $JoinLog -ExpectLeak -GateName "dismiss_sync_off") }
         "trade_burst"   { return (Test-TradeBurst      -HostFile $HostLog -JoinFile $JoinLog) }
         "drop_probe"    { return (Test-DropProbe       -HostFile $HostLog) }
         "wi_sync"       { return (Test-WorldItemSync   -HostFile $HostLog -JoinFile $JoinLog -Tol $Tolerance) }

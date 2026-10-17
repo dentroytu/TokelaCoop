@@ -91,7 +91,9 @@ PLAY (Steam - recommended)
   a squad. With a one-squad save, the HOST moves some characters into a second
   squad BEFORE the friend connects: it becomes the friend's when they join.
   Squads either of you creates or hires into later stay with whoever made them,
-  also after saving and loading.
+  also after saving and loading. Dismissing one of your characters (squad
+  screen) dismisses it in both games, also after saving and loading; you cannot
+  dismiss your friend's characters.
 
 PLAY (LAN / direct UDP - advanced)
 ----------------------------------

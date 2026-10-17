@@ -78,7 +78,7 @@ Replicator::Replicator()
       poolSeen_(-1), poolSent_(-1), poolSentMs_(0), poolTotal_(-1),
       poolSeq_(0), poolAcked_(0),
       moneySync_(true), recruitSync_(true),
-      squadSync_(true), tabsSeeded_(0), tabLedgerOn_(true), ledgerRecord_(false), ownGuardActive_(false),
+      squadSync_(true), dismissSync_(true), tabsSeeded_(0), tabLedgerOn_(true), ledgerRecord_(false), ownGuardActive_(false),
       cellAuth_(false), cellCollapse_(false), collapsed_(false),
       claimSendMs_(0), claimAssertMs_(0), claimMapMs_(0),
       facSeqOut_(1), facSampleMs_(0), factionSync_(true),
@@ -292,6 +292,8 @@ void Replicator::resetSession() {
     pinPeer_.clear();
     moveEcho_.clear();
     exitedOwn_.clear();
+    ownDismissed_.clear();   // Character* dangle after a swap
+    dismissBinds_.clear();
     // Protocol 35: the rank latch + the engine's pointer->hand baseline both
     // describe the OLD world (containers and Character* dangle after a swap);
     // the reloaded save re-seeds them at first census/poll.

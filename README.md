@@ -146,6 +146,10 @@ is needed after an edit.
   theirs when they join. A squad you split off while they are already connected
   stays yours until you save and load again. Squads either of you creates or
   recruits into later stay with whoever made them, across saves and reloads.
+  **Dismissing** a character (squad screen) works for each of you on your own
+  characters: it leaves both games and stays gone after saving and loading
+  (v0.56; before, the friend's dismissed characters came back on reload). You
+  cannot dismiss your friend's characters.
 - **Two-player starts included.** The TokelaCoop mod ships two game starts (New
   Game -> pick one from the list), both the vanilla Wanderer start with two
   wanderers already split into separate squads, so the host gets squad 1 and the

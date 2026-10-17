@@ -63,6 +63,10 @@ u32 folderFingerprint(const std::string& name);
 
 // Begin watching save 'name' (one watch at a time; re-arming resets).
 void armWatch(const std::string& name);
+// Re-send of a save already on disk (the friend's copy failed its check: Kenshi
+// rewrote a file after the folder looked settled): complete once the folder
+// holds still for the settle window, without waiting for a fresh change.
+void armWatchRetry(const std::string& name);
 bool watching();
 
 // Poll the watch (throttled internally; call every main-loop tick). Returns:

@@ -985,6 +985,11 @@ bool __fastcall recruit_hook(PlayerInterface* self, Character* c, bool editor) {
 // EVT_RECRUIT re-key on the peer).
 std::map<Character*, SquadHandRec> g_squadRoster;
 std::vector<SquadMoveEdge> g_squadMoveEdges;
+// Bodies this game dismissed (EngineDismiss.cpp): the dismissal has its own
+// event, so the sweep reports nothing about them - neither the move to the NPC
+// hand nor the exit (playerCharacters drops them on a later engine tick). An
+// entry lives until the pointer is gone from the roster.
+std::set<Character*> g_rosterIgnore;
 
 // Programmatic squad-move levers (probe tier). PlayerInterface::getFaction
 // feeds Character::setFaction(faction, targetPlatoon) - the header-documented
@@ -2327,8 +2332,17 @@ void pollSquadRoster(GameWorld* gw) {
     static unsigned int hs[MAXR][5];
     unsigned int n = snapshotRoster(gw, cs, hs, MAXR);
     if (n == 0) return; // mid-load/world-swap: never sweep a whole squad out
+    // Dismissed bodies: out of the baseline while they linger, forgotten once gone.
+    for (std::set<Character*>::iterator ig = g_rosterIgnore.begin(); ig != g_rosterIgnore.end(); ) {
+        bool present = false;
+        for (unsigned int i = 0; i < n; ++i)
+            if (cs[i] == *ig) { present = true; break; }
+        if (present) { g_squadRoster.erase(*ig); ++ig; }
+        else g_rosterIgnore.erase(ig++);
+    }
     // Mark: diff each surviving pointer's hand against the baseline.
     for (unsigned int i = 0; i < n; ++i) {
+        if (g_rosterIgnore.count(cs[i])) continue;
         std::map<Character*, SquadHandRec>::iterator it = g_squadRoster.find(cs[i]);
         if (it == g_squadRoster.end()) {
             // New pointer: seed only. A recruit ENTRY is the protocol-23
@@ -2371,7 +2385,18 @@ void pollSquadRoster(GameWorld* gw) {
 
 void clearSquadRoster() {
     g_squadRoster.clear();
+    g_rosterIgnore.clear();
     g_squadMoveEdges.clear();
+}
+
+void ignoreRosterChar(Character* c) {
+    if (!c) return;
+    g_rosterIgnore.insert(c);
+    g_squadRoster.erase(c);
+}
+
+bool rosterIgnored(Character* c) {
+    return c && !g_rosterIgnore.empty() && g_rosterIgnore.count(c) != 0;
 }
 
 unsigned int drainSquadMoveEdges(SquadMoveEdge* out, unsigned int maxOut) {

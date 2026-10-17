@@ -317,8 +317,11 @@ static void testSizes() {
     CHECK_EQ("EVT_SQUAD_MOVE id", (int)EVT_SQUAD_MOVE, 11);
     CHECK("EVT_SQUAD_MOVE distinct", EVT_SQUAD_MOVE != EVT_RECRUIT &&
           EVT_SQUAD_MOVE != EVT_NONE && EVT_SQUAD_MOVE != EVT_EXIT_FURNITURE);
-    CHECK_EQ("PROTOCOL_VERSION (v58: v0.55 role fix - a v0.54 friend's hits did no damage; refuses v0.54)",
-             (int)PROTOCOL_VERSION, 58);
+    CHECK_EQ("PROTOCOL_VERSION (v59: v0.56 dismissal sync)", (int)PROTOCOL_VERSION, 59);
+    CHECK_EQ("EVT_DISMISS id", (int)EVT_DISMISS, 12);
+    CHECK_EQ("EVT_DISMISS_BIND id", (int)EVT_DISMISS_BIND, 13);
+    CHECK("dismissal events distinct from the squad move",
+          EVT_DISMISS != EVT_SQUAD_MOVE && EVT_DISMISS_BIND != EVT_SQUAD_MOVE && EVT_DISMISS != EVT_DISMISS_BIND);
     CHECK_EQ("PKT_MODLIST id", (int)PKT_MODLIST, 49);
 
     // Protocol 52: the shared money pool. The two players spend from ONE wallet,
