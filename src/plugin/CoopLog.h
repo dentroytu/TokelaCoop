@@ -18,9 +18,14 @@
 
 namespace coop {
 
-// Open the log file at 'path' (truncating any previous run) and remember a
-// short mode tag (e.g. "HOST"/"JOIN"). Safe to call once at plugin load.
+// Open the log file at 'path' (the two previous runs are kept as name.1.log and
+// name.2.log) and remember a short mode tag (e.g. "HOST"/"JOIN"). Safe to call
+// once at plugin load.
 void logInit(const char* path, const char* modeTag);
+
+// Change the tag of later lines: the role picked in the F2 panel (a friend's
+// Kenshi boots as the default HOST and joins from the panel).
+void logSetTag(const char* modeTag);
 
 // The wall clock every timestamp in this plugin derives from: milliseconds
 // since local midnight PLUS the injected fake skew (see logSetFakeSkewMs).

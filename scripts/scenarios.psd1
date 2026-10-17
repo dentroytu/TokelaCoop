@@ -2014,6 +2014,29 @@
             Advisory = @('smoothness', 'anim_truth', 'march')
             Tier = 'full'; WanVariant = $false
         }
+        # pc_assault_ui / store_sync_ui: the same, but the join boots as the default
+        # HOST - as a real friend's Kenshi does, since the kit's coop_config.json has
+        # no role - and joins through the F2 panel's path (coopUiConnect). Before
+        # applyRoleSettings, the role-dependent settings stayed the host's: the
+        # friend's melee on the host's NPCs never reached the host (no damage) and
+        # both games census-authored the same chests. Clean only: the panel path
+        # re-reads ip/port from coop_config.json, so a WAN proxy port would be lost.
+        pc_assault_ui = @{
+            DiagEnv = @{ TOKELACOOP_ROLE_VIA_UI = '1' }
+            Save = 'sync'; Setup = ''; Tolerance = 20.0
+            PrimaryGate = 'pc_assault'
+            Gating   = @('pc_assault', 'clock_sync', 'role_via_ui')
+            Advisory = @('smoothness', 'anim_truth', 'march')
+            Tier = 'full'; WanVariant = $false
+        }
+        store_sync_ui = @{
+            DiagEnv = @{ TOKELACOOP_INV_SYNC = '1'; TOKELACOOP_ROLE_VIA_UI = '1' }
+            Save = 'sync'; Setup = ''; Tolerance = 6.0
+            PrimaryGate = 'store_sync'
+            Gating   = @('store_sync', 'clock_sync', 'role_via_ui')
+            Advisory = @('smoothness', 'anim_truth', 'march')
+            Tier = 'full'; WanVariant = $false
+        }
 
         # ---- inventory ---------------------------------------------------------------
         inv_order = @{

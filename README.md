@@ -1,9 +1,9 @@
 # TokelaCoop
 
-**Current version: v0.54.** Up to v0.53 this project was called **KenshiCoop**.
+**Current version: v0.55.** Up to v0.53 this project was called **KenshiCoop**.
 TokelaCoop is a modified fork of [nhoral/KenshiCoop](https://github.com/nhoral/KenshiCoop).
 In game, the top-left banner and the F2 panel title show the name and the
-version ("TokelaCoop v0.54"): check that you and your friend see the same one.
+version ("TokelaCoop v0.55"): check that you and your friend see the same one.
 
 Setup + Demo (upstream KenshiCoop): [https://www.youtube.com/watch?v=OqwVRRZEYGM](https://www.youtube.com/watch?v=OqwVRRZEYGM)
 
@@ -180,16 +180,24 @@ is needed after an edit.
   captured ID - confirm it matches). If "Paste friend's Steam ID" reports the
   clipboard wasn't a Steam ID, have your friend re-copy theirs. Look for
   `[steam] session ... active=1` in `<Kenshi>\TokelaCoop_*.log`.
-- **"Mods: DIFFERENT" on the F2 panel** (or "mods differ" on the banner) - you
-  and your friend don't have the same mods, versions or load order. Missing
-  entities and items are the usual symptom. `<Kenshi>\TokelaCoop_mods_diff.txt`
-  lists every difference, and **"Copy friend's mod list"** copies their load
-  order to paste into `data\mods.cfg` or match in the launcher. The check only
-  warns, it never blocks the connection (new in this fork, not yet tested
-  in-game).
+- **"Mods DIFFERENT: ..." / "Mods DISTINTOS: ..." on the F2 panel** (or "mods
+  differ" on the banner) - you and your friend don't have the same mods,
+  versions or load order. Missing entities and items are the usual symptom.
+  `<Kenshi>\TokelaCoop_mods_diff.txt` lists every difference, and **"Copy
+  friend's mod list"** copies their load order to paste into `data\mods.cfg` or
+  match in the launcher. The check only warns, it never blocks the connection.
+  With very many mods it may say the lists are too long to compare them all:
+  check them by hand.
 - **"your friend has another version" on the F2 panel** - one of you has a build
   with a different network protocol; both players should re-install from the
-  same release.
+  same release. v0.55 refuses v0.54: with v0.54 a friend who joined from the F2
+  panel dealt no damage to NPCs.
+- **Anything odd** - double-click **`Recoger diagnostico.cmd`** in the kit: it
+  leaves a zip on the Desktop with the logs (this run and the two before, kept
+  as `TokelaCoop_*.1.log` / `.2.log`), the mod list and the versions - not your
+  saves; the logs hold both players' Steam IDs. When a received save replaces
+  one you had with the same name, the old one is kept in
+  `%LOCALAPPDATA%\kenshi\TokelaCoop_backups` (the newest 3).
 - **"your friend has an older version of the mod (probably KenshiCoop ...)"** -
   your friend still has the old KenshiCoop (v0.53 or older). Since v0.54 the two
   refuse each other instead of playing with different rules: they should run the

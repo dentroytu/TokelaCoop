@@ -32,7 +32,7 @@
 //   --mode M        welcome      admit (WELCOME with this build's version)
 //                   version:N    WELCOME claiming protocol N (client-side check)
 //                   legacy       disconnect with data 0, like v0.53 and older
-//                   refuse:HEX   disconnect with this code (e.g. 4B010039)
+//                   refuse:HEX   disconnect with this code (e.g. 4B01003A = VERSION, final, v58)
 //   --seconds S     how long to listen                  (default 60)
 // Prints every event and, at the end, how many HELLOs arrived - a client that
 // stops retrying after a final refusal sends exactly one.

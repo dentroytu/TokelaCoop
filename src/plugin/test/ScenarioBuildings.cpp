@@ -1516,6 +1516,7 @@ Scenario* makeBuildingScenario(const std::string& name) {
     if (name == "research_sync")  return new ResearchProbeScenario(false);
     if (name == "store_probe")    return new StoreProbeScenario(true);
     if (name == "store_sync")     return new StoreProbeScenario(false);
+    if (name == "store_sync_ui")  return new StoreProbeScenario(false); // join via the F2 panel path
     return 0;
 }
 

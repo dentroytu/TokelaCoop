@@ -14,6 +14,7 @@
 
 #include "EngineInternal.h"
 #include <kenshi/ModInfo.h>        // ModInfo::file / header.version (protocol 56 mod list)
+#include "../core/ModList.h"       // modShortStart
 
 namespace coop {
 namespace engine {
@@ -1888,12 +1889,18 @@ bool activeModList(char* text, unsigned int cap, unsigned int* textLen,
             if (!m) continue;
             const char* f = m->file.c_str();
             unsigned int fl = (unsigned int)m->file.size();
+            // Folder + name only (core/ModList.h modShortStart): the receiver
+            // compares names, and full paths cut the list at about 40 mods.
+            const unsigned int s0 = coop::modShortStart(f, fl);
+            f += s0; fl -= s0;
             char vb[16];
             int vl = _snprintf(vb, sizeof(vb) - 1, "%d", m->header.version);
             if (vl < 0) vl = 0;
             unsigned int need = fl + 1 + (unsigned int)vl + 1;
             if (used + need >= cap) { if (truncated) *truncated = true; break; }
-            memcpy(text + used, f, fl);             used += fl;
+            for (unsigned int k = 0; k < fl; ++k)
+                text[used + k] = (f[k] == '\\') ? '/' : f[k];
+            used += fl;
             text[used++] = '|';
             memcpy(text + used, vb, (size_t)vl);    used += (unsigned int)vl;
             text[used++] = '\n';

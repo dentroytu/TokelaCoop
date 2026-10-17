@@ -14,7 +14,9 @@
       coop_config.json            only needed for LAN/direct-UDP; Steam play is
                                   configured entirely in-game (F2)
     Instalar TokelaCoop.cmd     <- one-click installer (runs installer\*.ps1)
-    installer\                  <- Install-TokelaCoop.ps1 + TokelaCoopInstaller.psm1
+    Recoger diagnostico.cmd     <- zips logs, mod list and versions to the Desktop
+    installer\                  <- Install-TokelaCoop.ps1, Collect-Diagnostics.ps1,
+                                   TokelaCoopInstaller.psm1
     README.txt                  <- install/play instructions (NOT copied into
                                   mods, so it never clutters the game folder)
   ...then zips it to dist\TokelaCoop-kit.zip (the release artifact the README
@@ -128,6 +130,7 @@ Write-Host "  .mod description: $((Get-ModInfo $kitMod).Description.Substring(0,
 $kitSrc = Join-Path $repoRoot "kit"
 Copy-Item (Join-Path $kitSrc "README.txt") (Join-Path $kitDir "README.txt")
 Copy-Item -LiteralPath (Join-Path $kitSrc "Instalar TokelaCoop.cmd") -Destination $kitDir
+Copy-Item -LiteralPath (Join-Path $kitSrc "Recoger diagnostico.cmd") -Destination $kitDir
 Copy-Item -Recurse (Join-Path $kitSrc "installer") (Join-Path $kitDir "installer")
 
 # Provenance: assert the PACKAGED DLL is byte-identical to the canonical build,

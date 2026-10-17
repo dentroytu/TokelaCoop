@@ -134,6 +134,7 @@ void loadConfig(Config& c) {
     c.aiSuspend = (envOr("TOKELACOOP_AI_SUSPEND", "1") != "0") ||
                   (envOr("TOKELACOOP_PROBE_AISUSPEND", "") == "1");
     c.noDetach  = envOr("TOKELACOOP_NO_DETACH", "") == "1";
+    c.roleViaUi = envOr("TOKELACOOP_ROLE_VIA_UI", "") == "1";
     c.damageGuard = envOr("TOKELACOOP_DAMAGE_GUARD", "1") != "0";
     c.ownGuard    = envOr("TOKELACOOP_OWN_GUARD", "1") != "0";
     c.tabLedger   = envOr("TOKELACOOP_TAB_LEDGER", "1") != "0";
@@ -514,10 +515,13 @@ void reloadPeerFromFile(Config& c) {
     it = f.find("steamPeer");
     if (it != f.end() && !it->second.empty())
         c.steamPeer = (unsigned long long)_strtoui64(it->second.c_str(), 0, 10);
+    // An address set in the environment (the harness, or an advanced launch)
+    // wins over the file, as it does at startup.
     it = f.find("ip");
-    if (it != f.end() && !it->second.empty()) c.ip = it->second;
+    if (it != f.end() && !it->second.empty() && envOr("TOKELACOOP_IP", "").empty()) c.ip = it->second;
     it = f.find("port");
-    if (it != f.end() && !it->second.empty()) c.port = std::atoi(it->second.c_str());
+    if (it != f.end() && !it->second.empty() && envOr("TOKELACOOP_PORT", "").empty())
+        c.port = std::atoi(it->second.c_str());
 }
 
 } // namespace coop

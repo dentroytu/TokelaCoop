@@ -8,6 +8,7 @@
 
 #include <windows.h>
 #include <cstdio>
+#include <cstring>
 
 namespace coop {
 namespace {
@@ -66,9 +67,29 @@ void logInit(const char* path, const char* modeTag) {
     }
 
     if (path && path[0]) {
-        g_fp = std::fopen(path, "w"); // fresh file each run
+        // Keep the two previous runs (name.1.log, name.2.log): a fresh file each
+        // run lost the log of a crash as soon as the player started Kenshi again.
+        char p1[MAX_PATH], p2[MAX_PATH];
+        const size_t n = std::strlen(path);
+        const bool dotLog = n > 4 && _stricmp(path + n - 4, ".log") == 0;
+        const int base = (int)(dotLog ? n - 4 : n);
+        _snprintf(p1, sizeof(p1) - 1, "%.*s.1%s", base, path, dotLog ? ".log" : "");
+        _snprintf(p2, sizeof(p2) - 1, "%.*s.2%s", base, path, dotLog ? ".log" : "");
+        p1[sizeof(p1) - 1] = '\0'; p2[sizeof(p2) - 1] = '\0';
+        MoveFileExA(p1, p2, MOVEFILE_REPLACE_EXISTING);
+        MoveFileExA(path, p1, MOVEFILE_REPLACE_EXISTING);
+        g_fp = std::fopen(path, "w");
     }
     writeLine("INFO", "log opened");
+}
+
+void logSetTag(const char* modeTag) {
+    if (!g_init || !modeTag) return;
+    EnterCriticalSection(&g_cs);
+    size_t i = 0;
+    for (; modeTag[i] && i < sizeof(g_tag) - 1; ++i) g_tag[i] = modeTag[i];
+    g_tag[i] = '\0';
+    LeaveCriticalSection(&g_cs);
 }
 
 void logLine(const char* msg)    { writeLine("INFO",  msg); }

@@ -215,7 +215,13 @@ powershell -ExecutionPolicy Bypass -File scripts\regress.ps1 -Tier full -SkipBui
   - `PROTOCOL_VERSION` se comprueba en el handshake: súbelo al cambiar cualquier paquete.
   - Rechazos: el host desconecta con un código en el u32 de DISCONNECT de ENet (`refuseEncode`: VERSION, FULL con reintento).
     Regla: el host **nunca** desconecta con 0. Así rechazan las versiones hasta la v0.53, y un cliente tiene que poder distinguirlas.
-  - Protocolo 57 desde la v0.54 (la v0.53 era 56): los dos se rechazan con aviso en vez de jugar con reglas distintas.
+  - Protocolo 57 desde la v0.54 (la v0.53 era 56) y 58 desde la v0.55 (cambio de rol desde el panel; rechaza la
+    v0.54, con la que el amigo que entraba desde F2 no hacía daño): se rechazan con aviso en vez de jugar con reglas
+    distintas. Desde la v0.55 el HELLO lleva `TokelaCoop/<versión>` en el nombre (sale en el log del host), y el host
+    se despide con `REFUSE_HOST_CLOSED` al parar.
+  - **Rol:** todo lo que depende de ser host o amigo está en `applyRoleSettings()` (`Plugin.cpp`), que se llama al
+    arrancar y en `coopUiConnect`. Un amigo real arranca como host por defecto y elige "Unirse" en F2; el harness
+    lo reproduce con `TOKELACOOP_ROLE_VIA_UI=1` (`pc_assault_ui`, `store_sync_ui`, puerta `role_via_ui`).
   - Sesión de 2: el host rechaza como FULL a un segundo peer mientras hay uno admitido, y el cliente se despide al parar
     (también al cerrar Kenshi) para liberar la plaza al momento.
   - `src/prototest` fija el tamaño y el round-trip de cada struct.

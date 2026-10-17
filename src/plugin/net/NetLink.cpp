@@ -4,6 +4,7 @@
 #include "SteamP2P.h"
 #include "../CoopLog.h"
 #include "../core/Refusal.h" // classifyDrop: why a client's attempt ended
+#include "../../netproto/Version.h" // TOKELACOOP_NAME/VERSION in HELLO
 
 #include <cstring>
 #include <cstdio>
@@ -102,6 +103,14 @@ struct LogThrottle {
 // event for every peer that ever reached CONNECTED - so a friend whose previous
 // connection has not been released yet still counts, and its late leave can
 // never land on top of a newer session.
+// How long a silent peer is kept before ENet drops it. The default minimum (5 s)
+// ended a session on a short Wi-Fi drop, which then cost a full save transfer to
+// rejoin; 10 s rides those out. The maximum stays 30 s, so a crashed friend is
+// still noticed as fast as before.
+void tunePeerTimeout(ENetPeer* p) {
+    if (p) enet_peer_timeout(p, ENET_PEER_TIMEOUT_LIMIT, 10000, ENET_PEER_TIMEOUT_MAXIMUM);
+}
+
 // Bytes sent to a peer and not acknowledged yet, plus every command still waiting
 // in its outgoing queues (all channels). ENet's reliable window and bandwidth
 // throttle are per PEER, so a big backlog on any channel delays all of them.
@@ -455,6 +464,7 @@ void NetLink::threadLoop() {
         else       enet_address_set_host(&addr, ip_.c_str());
         addr.port = (enet_uint16)port_;
         serverPeer_ = enet_host_connect(enetHost_, &addr, CH_COUNT, 0);
+        tunePeerTimeout(serverPeer_);
         if (!serverPeer_) netErr("connect failed");
         else              netLog("connecting");
     }
@@ -523,6 +533,7 @@ void NetLink::threadLoop() {
                 addr.port = (enet_uint16)port_;
                 serverPeer_ = enet_host_connect(enetHost_, &addr, CH_COUNT, 0);
                 if (steam && serverPeer_) serverPeer_->mtu = 1200;
+                tunePeerTimeout(serverPeer_);
                 netLog(serverPeer_ ? "reconnecting" : "reconnect failed");
             }
         }
@@ -531,6 +542,7 @@ void NetLink::threadLoop() {
         while (enet_host_service(enetHost_, &ev, TICK_MS) > 0) {
             switch (ev.type) {
                 case ENET_EVENT_TYPE_CONNECT: {
+                    tunePeerTimeout(ev.peer);
                     if (isHost_) {
                         // Wait for the client's HELLO before assigning an id, so
                         // a version mismatch is rejected before we admit it. A
@@ -563,10 +575,18 @@ void NetLink::threadLoop() {
                         epochSeen_.clear();
                         gotConnect = true;
                         InterlockedExchange(&noAnswerSince_, 0);
-                        // Introduce ourselves with our protocol version.
+                        // Introduce ourselves with our protocol version, and the
+                        // release ("TokelaCoop/0.55") in the name field so the
+                        // host's log says which build its friend runs.
                         HelloPacket h;
-                        h.type = (u8)PKT_HELLO; h.version = wireVer_; h.nameLen = 0;
-                        ENetPacket* out = enet_packet_create(&h, sizeof(h), ENET_PACKET_FLAG_RELIABLE);
+                        h.type = (u8)PKT_HELLO; h.version = wireVer_;
+                        const char* rel = TOKELACOOP_NAME "/" TOKELACOOP_VERSION;
+                        const size_t rl = strlen(rel);
+                        h.nameLen = (u8)(rl > 63 ? 63 : rl);
+                        unsigned char hb[sizeof(HelloPacket) + 64];
+                        memcpy(hb, &h, sizeof(h));
+                        memcpy(hb + sizeof(h), rel, h.nameLen);
+                        ENetPacket* out = enet_packet_create(hb, sizeof(h) + h.nameLen, ENET_PACKET_FLAG_RELIABLE);
                         enet_peer_send(ev.peer, CH_RELIABLE, out);
                         netLog("connected to host; sent HELLO");
                     }
@@ -640,6 +660,23 @@ void NetLink::threadLoop() {
                                 enet_peer_disconnect(ev.peer, refuse);
                             } else {
                                 u32 id = nextId++;
+                                // Which release the friend runs (logged once, on
+                                // admission: refused peers retry every ~2 s).
+                                if (h.nameLen > 0 && h.nameLen < 64 &&
+                                    ev.packet->dataLength >= sizeof(h) + h.nameLen) {
+                                    char nm[64];
+                                    memcpy(nm, ev.packet->data + sizeof(h), h.nameLen);
+                                    nm[h.nameLen] = '\0';
+                                    for (unsigned k = 0; k < h.nameLen; ++k)
+                                        if (nm[k] < 0x20 || nm[k] > 0x7e) nm[k] = '?';
+                                    char vb[128];
+                                    _snprintf(vb, sizeof(vb) - 1, "friend runs '%s' (this is %s/%s)",
+                                              nm, TOKELACOOP_NAME, TOKELACOOP_VERSION);
+                                    vb[sizeof(vb) - 1] = '\0';
+                                    netLog(vb);
+                                } else {
+                                    netLog("friend does not say its release (TokelaCoop v0.54 or older)");
+                                }
                                 // Admitting starts this peer's epoch sequence; see
                                 // the client's CONNECT note (v44).
                                 epochSeen_.clear();
@@ -1215,8 +1252,13 @@ void NetLink::threadLoop() {
                                 InterlockedExchange(&refusal_, (LONG)latch);
                             } else {
                                 // No answer, or a real session ended: nothing to
-                                // explain beyond "connecting"; retry as before.
-                                InterlockedExchange(&refusal_, 0);
+                                // explain beyond "connecting"; retry as before -
+                                // except "your friend closed the game", which the
+                                // unanswered retries after it must not wipe (the
+                                // WELCOME clears it when the host is back).
+                                const u32 cur = (u32)InterlockedCompareExchange(&refusal_, 0, 0);
+                                if (refuseReason(cur) != REFUSE_HOST_CLOSED)
+                                    InterlockedExchange(&refusal_, 0);
                                 lastSoftLogged = 0;
                             }
                         }
@@ -2136,7 +2178,7 @@ void NetLink::threadLoop() {
     }
 
     // Client goodbye. enet_host_destroy sends nothing, so without this the host
-    // keeps our slot until ENet times it out (5-30 s), and a quick
+    // keeps our slot until ENet times it out (10-30 s), and a quick
     // Desconectar -> Conectar would be refused as FULL for that long. Disconnect
     // properly and give the ack up to 250 ms (stop() waits on this thread).
     if (!isHost_ && enetHost_ && serverPeer_ &&
@@ -2153,6 +2195,31 @@ void NetLink::threadLoop() {
         }
         netLog(acked ? "said goodbye to host" : "goodbye to host not acknowledged in 250 ms");
         serverPeer_ = 0;
+    }
+
+    // Host goodbye: tell the friend WHY the session ended (REFUSE_HOST_CLOSED,
+    // soft), so their panel says "your friend closed or restarted the game"
+    // instead of retrying with no explanation. Same 250 ms budget.
+    if (isHost_ && enetHost_) {
+        unsigned int told = 0;
+        for (size_t i = 0; i < enetHost_->peerCount; ++i) {
+            ENetPeer* p = &enetHost_->peers[i];
+            if (p->state != ENET_PEER_STATE_CONNECTED) continue;
+            enet_peer_disconnect(p, refuseEncode((u8)REFUSE_HOST_CLOSED, true, wireVer_));
+            ++told;
+        }
+        if (told) {
+            const DWORD t0 = GetTickCount();
+            ENetEvent ge;
+            unsigned int acked = 0;
+            while (acked < told && (GetTickCount() - t0) < 250) {
+                const int r = enet_host_service(enetHost_, &ge, 25);
+                if (r < 0) break;
+                if (r > 0 && ge.type == ENET_EVENT_TYPE_RECEIVE) enet_packet_destroy(ge.packet);
+                if (r > 0 && ge.type == ENET_EVENT_TYPE_DISCONNECT) ++acked;
+            }
+            netLog(acked ? "told the friend the host is closing" : "host-closing notice not acknowledged in 250 ms");
+        }
     }
 
     if (enetHost_) { enet_host_destroy(enetHost_); enetHost_ = 0; }

@@ -446,11 +446,13 @@ void sendModList() {
 
 void writeModDiffFile(const std::vector<coop::ModEntry>& mine,
                       const std::vector<coop::ModEntry>& theirs,
-                      const coop::ModDiff& d) {
+                      const coop::ModDiff& d, bool cut) {
     FILE* f = fopen("TokelaCoop_mods_diff.txt", "w");
     if (!f) return;
     fprintf(f, "TokelaCoop - your mods vs your friend's (%s)\n\n",
             g_cfg.isHost ? "you host" : "you join");
+    if (cut)
+        fprintf(f, "NOTE: a mod list did not fit in the packet - the mods after the cut were not compared.\n\n");
     for (size_t i = 0; i < d.missing.size(); ++i)
         fprintf(f, "MISSING (friend has it, you don't): %s\n", d.missing[i].c_str());
     for (size_t i = 0; i < d.extra.size(); ++i)
@@ -505,7 +507,10 @@ void checkModLists() {
         coop::parseModText(mine.text, mine.textLen, mineV);
         coop::parseModText(theirs.text, tlen, theirsV);
         g_peerModsCfg = coop::modsCfgText(theirsV);
-        if (mine.hash == theirs.hash && mine.textLen == theirs.textLen) {
+        // A list that did not fit is never "the same": both could be cut at the
+        // same mod while the ones after it differ.
+        const bool cut = ((mine.flags | theirs.flags) & coop::MODLIST_TRUNCATED) != 0;
+        if (mine.hash == theirs.hash && mine.textLen == theirs.textLen && !cut) {
             _snprintf(b, sizeof(b) - 1, coop::L("Mods: los mismos que tu amigo (%u)",
                                                 "Mods: same as your friend (%u)"),
                       (unsigned)mineV.size());
@@ -519,12 +524,19 @@ void checkModLists() {
         }
         coop::ModDiff d = coop::diffModLists(mineV, theirsV);
         std::string sum = coop::summarizeModDiff(d);
-        g_modsWarn = !d.same();
-        g_modsLine = g_modsWarn
-            ? std::string(coop::L("Mods DISTINTOS: ", "Mods DIFFERENT: ")) +
-                  coop::summarizeModDiff(d, coop::uiSpanish()) +
-                  coop::L(" (detalle en TokelaCoop_mods_diff.txt)", " (see TokelaCoop_mods_diff.txt)")
-            : std::string(coop::L("Mods: los mismos que tu amigo", "Mods: same as your friend"));
+        if (cut) sum += " (list incomplete)";
+        g_modsWarn = !d.same() || cut;
+        if (!d.same())
+            g_modsLine = std::string(coop::L("Mods DISTINTOS: ", "Mods DIFFERENT: ")) +
+                         coop::summarizeModDiff(d, coop::uiSpanish()) +
+                         (cut ? coop::L(" y la lista no cabe entera", " and the list does not fit")
+                              : "") +
+                         coop::L(" (detalle en TokelaCoop_mods_diff.txt)", " (see TokelaCoop_mods_diff.txt)");
+        else if (cut)
+            g_modsLine = coop::L("Mods: demasiados para compararlos todos; comprueba que teng\xC3\xA1is los mismos",
+                                 "Mods: too many to compare them all; check you both have the same");
+        else
+            g_modsLine = coop::L("Mods: los mismos que tu amigo", "Mods: same as your friend");
         _snprintf(b, sizeof(b) - 1, "[mods] %s mine=%08x theirs=%08x: %s",
                   g_modsWarn ? "MISMATCH" : "MATCH", mine.hash, theirs.hash, sum.c_str());
         b[sizeof(b) - 1] = '\0'; coopLog(b);
@@ -534,7 +546,7 @@ void checkModLists() {
             coopLog(("[mods]   extra: " + d.extra[i]).c_str());
         for (size_t i = 0; i < d.versionDiff.size(); ++i)
             coopLog(("[mods]   version: " + d.versionDiff[i]).c_str());
-        if (g_modsWarn) writeModDiffFile(mineV, theirsV, d);
+        if (g_modsWarn) writeModDiffFile(mineV, theirsV, d, cut);
     }
 }
 
@@ -1135,7 +1147,9 @@ void coopPanelDrive(bool atTitle) {
             // answering: ENet only ends that attempt after ~30 s, so let "not
             // answering" take over after 6 s. A final code never has a later
             // unanswered attempt (the retries stopped).
-            if (code != 0 && !(coop::refuseRetry(code) && noAnswer))
+            // "Your friend closed the game" stays up while the host is away.
+            const bool hostClosed = coop::refuseReason(code) == coop::REFUSE_HOST_CLOSED;
+            if (code != 0 && !(coop::refuseRetry(code) && noAnswer && !hostClosed))
                 rt = coop::joinRefusalText(code, g_net.wireVersion(), es);
             else if (noAnswer)
                 rt = coop::joinNoAnswerText(es, g_net.steamTransport());
@@ -2351,6 +2365,49 @@ void startNetworking() {
     if (!ok) coopErr("TokelaCoop: networking failed to start");
 }
 
+// The melee damage-guard detour is in (installEngineDetours).
+bool g_damageGuardOn = false;
+
+// Everything that depends on being the host or the friend. Applied at startup
+// and again whenever the F2 panel (or an accepted Steam invite) picks the role:
+// a real friend starts Kenshi as the default HOST (the kit's coop_config.json
+// has no role) and joins from the panel, and these used to be fixed at startup -
+// their melee on the host's NPCs was cancelled locally and never reported (no
+// damage), both games census-authored the same chests, and the join-side NPC
+// trust stayed off. The harness always started the join already as JOIN.
+void applyRoleSettings() {
+    const bool host = g_cfg.isHost;
+    // Host streams world NPCs; join drives. Under presence authority both do,
+    // each for the cells it claims.
+    g_repl.setStreamNpcs(host || g_cfg.cellAuth);
+    const bool report = g_damageGuardOn && !host;
+    g_repl.setReportCombat(report);
+    if (!report) {
+        coop::engine::setCombatReport(false);
+        coop::engine::clearReportAttackers();
+    }
+    // The host's "friend's swings" set holds the friend's Character pointers; as
+    // a join after a world load they would dangle and could veto our own hits.
+    // The host rebuilds it on its next tick.
+    coop::engine::clearRemoteSwingers();
+    g_repl.setStoreSync(g_cfg.storeSync && host);
+    g_repl.setProbeRecruit(!host && g_cfg.probeRecruit);   // harness lever
+    g_repl.setGateAuthority(!host && g_cfg.gateAuthority);
+    g_repl.setNoDetach(!host && g_cfg.noDetach);
+    char b[200];
+    _snprintf(b, sizeof(b) - 1,
+              "[role] %s: npcStream=%d combatReport=%d storeCensus=%d npcTrust=%d",
+              host ? "HOST" : "JOIN", (host || g_cfg.cellAuth) ? 1 : 0, report ? 1 : 0,
+              (g_cfg.storeSync && host) ? 1 : 0, (!host && g_cfg.gateAuthority) ? 1 : 0);
+    b[sizeof(b) - 1] = '\0';
+    coopLog(b);
+    if (report) coopLog("[dmg] combat-hit report ON (join)");
+    if (!host && g_cfg.gateAuthority)
+        coopLog("[trust] divergence-gated authority ON (default; TOKELACOOP_GATE_AUTHORITY=0 disables)");
+    if (!host && g_cfg.noDetach)
+        coopLog("[quiet] TOKELACOOP_NO_DETACH=1: sitter detachFromTownAI SKIPPED (experiment)");
+}
+
 // In-game panel handlers. coopUiConnect tears down any live session, re-arms the
 // config from the panel's choices, and restarts via the shared startNetworking()
 // path (NetLink cleanly supports stop() then start again; Steam is re-armed and
@@ -2372,9 +2429,8 @@ void coopUiConnect(bool isHost, bool useSteam, unsigned long long peerId) {
     // normal flow is Copy my Steam ID -> friend Pastes it -> Connect, with no file
     // editing. peerId is 0 when nothing was pasted, so the config value stands.
     if (peerId != 0) g_cfg.steamPeer = peerId;
-    // Host streams world NPCs; join drives. Under presence authority both do,
-    // each for the cells it claims.
-    g_repl.setStreamNpcs(isHost || g_cfg.cellAuth);
+    coop::logSetTag(isHost ? "HOST" : "JOIN");
+    applyRoleSettings();
     // Ownership ranks must follow the role chosen in the panel. Only an explicit
     // TOKELACOOP_OWN_SQUAD override is preserved; otherwise recompute the default
     // (host owns {0}, join owns {1}). Without this, a session launched as HOST
@@ -2549,7 +2605,7 @@ void configureReplicator() {
 
     // Stage 4: the host streams nearby world NPCs (host-authoritative) in addition
     // to its squad; the join resolves each by hand and drives it like a squad body.
-    if (g_cfg.isHost || g_cfg.cellAuth) g_repl.setStreamNpcs(true);
+    // (Set with the other role-dependent settings in applyRoleSettings.)
 
     // Bidirectional presence: this client owns (controls + streams) a disjoint set of
     // the shared squad chosen by save-stable hand-rank; it drives the peer's owned
@@ -2661,7 +2717,7 @@ void configureReplicator() {
     g_repl.setSpawnSync(g_cfg.spawnSync);
 
     // AI-gating probe (join side): recruit diverged NPCs to test the inhabit lever.
-    if (!g_cfg.isHost && g_cfg.probeRecruit) g_repl.setProbeRecruit(true);
+    // probeRecruit (join-only harness lever) is set with the role: applyRoleSettings.
 }
 
 // Install every engine detour + set the detour-backed channel enables (AI
@@ -2712,19 +2768,8 @@ void installEngineDetours() {
     g_repl.setJailObserve(g_cfg.jailObserve);
     if (g_cfg.jailObserve)
         coopLog("[jail] TOKELACOOP_JAIL_OBSERVE=1: captive drive/suspend/self-heal OFF; [jail] OBSERVE tracing ON");
-    // Step-2 experiment: sitter no-detach A/B (manual runs only; off by default).
-    if (!g_cfg.isHost && g_cfg.noDetach) {
-        g_repl.setNoDetach(true);
-        coopLog("[quiet] TOKELACOOP_NO_DETACH=1: sitter detachFromTownAI SKIPPED (experiment)");
-    }
-
-    // Divergence-gated authority (join side, DEFAULT ON since the step-4 A/B):
-    // trust world NPCs whose local AI sustainedly agrees with the host; drive
-    // only divergence. TOKELACOOP_GATE_AUTHORITY=0 disables (A/B escape hatch).
-    if (!g_cfg.isHost && g_cfg.gateAuthority) {
-        g_repl.setGateAuthority(true);
-        coopLog("[trust] divergence-gated authority ON (default; TOKELACOOP_GATE_AUTHORITY=0 disables)");
-    }
+    // The join-only sitter no-detach experiment and divergence-gated authority
+    // depend on the role: applyRoleSettings.
 
     // Damage guard (BOTH sides, DEFAULT ON): locally-simulated melee hits on
     // driven bodies are suppressed (HIT_MISSED) so cosmetic fights cannot diverge
@@ -2741,10 +2786,9 @@ void installEngineDetours() {
             // natively). Enabling report mode on the join makes the guard accumulate
             // the damage its player-squad melee WOULD have dealt to driven world-NPC
             // copies; publishCombatHits forwards it and the host wounds the real body.
-            g_repl.setReportCombat(!g_cfg.isHost);
-            coopLog(g_cfg.isHost
-                ? "[dmg] hitByMeleeAttack detour installed; damage guard ON (host, driven peer-squad bodies)"
-                : "[dmg] hitByMeleeAttack detour installed; damage guard ON + combat-hit report ON (join)");
+            // Switched with the role (applyRoleSettings).
+            g_damageGuardOn = true;
+            coopLog("[dmg] hitByMeleeAttack detour installed; damage guard ON");
         } else {
             coopLog("[dmg] FAILED to install hitByMeleeAttack detour; damage guard disabled");
         }
@@ -2828,8 +2872,8 @@ void installEngineDetours() {
     // interest centers (the ~1 Hz census inside publishInventories); the join
     // reconciles via the translated key. Host-only flag - the join must never
     // census-author (host-authoritative world containers). Layered on invSync
-    // (publishInventories is the carrier and is gated on it below).
-    g_repl.setStoreSync(g_cfg.storeSync && g_cfg.isHost);
+    // (publishInventories is the carrier and is gated on it below). Set with
+    // the role (applyRoleSettings).
     if (g_cfg.recruitSync) {
         if (coop::engine::installRecruitHook())
             coopLog("[recruit] recruit detour installed; recruitment sync ON");
@@ -2981,7 +3025,7 @@ void __cdecl crtExit_hook(int code) {
         coopLog(b);
     }
     // Quitting Kenshi mid-session: a join says goodbye (NetLink's stop path) so
-    // the host sees its friend leave at once instead of after a 5-30 s timeout.
+    // the host sees its friend leave at once instead of after a 10-30 s timeout.
     // Bounded: a stuck net thread must not hang the close.
     if (g_net.isRunning()) {
         coopLog(g_net.stopForExit(1000) ? "[exit] network stopped"
@@ -3040,9 +3084,24 @@ __declspec(dllexport) void startPlugin() {
     if (!installMainLoopHook())
         return;
 
+#ifdef TOKELACOOP_HARNESS
+    // TOKELACOOP_ROLE_VIA_UI=1 (harness): a JOIN run boots the way a real friend's
+    // Kenshi does - as the default HOST - and joins through the F2 panel's path
+    // (coopUiConnect) when the session starts, so the role switch is tested.
+    bool joinViaUi = false;
+    if (g_cfg.roleViaUi && !g_cfg.isHost) {
+        joinViaUi = true;
+        g_cfg.isHost = true;
+        coop::resolveOwnRanks(g_cfg.ownRanks, true, g_cfg.ownRanksFromEnv);
+        coopLog("[role] TOKELACOOP_ROLE_VIA_UI=1: booting as HOST, joining via the panel path");
+    }
+#endif
+
     configureReplicator();
 
     installEngineDetours();
+
+    applyRoleSettings();
 
     installTitleHook();
 
@@ -3092,6 +3151,12 @@ __declspec(dllexport) void startPlugin() {
     }
 
     if (autoStart) {
+#ifdef TOKELACOOP_HARNESS
+        if (joinViaUi) {
+            coopUiConnect(false, g_cfg.transport == "steam", 0);
+            return;
+        }
+#endif
         startNetworking();
     } else {
         coopLog("TokelaCoop: session DEFERRED - press F2 in-game to pick role/transport, "
