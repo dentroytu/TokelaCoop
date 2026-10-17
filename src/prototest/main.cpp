@@ -36,6 +36,7 @@
 #include "../plugin/core/Refusal.h" // how a client reads a refusal + its player text
 #include "../plugin/core/TextWrap.h" // F2 panel: one row per wrapped line
 #include "../plugin/core/Inbound.h" // Phase 0 queue-lifecycle fixes (header-only)
+#include "../plugin/core/LastFriend.h" // "Volver a jugar con <amigo>" (header-only)
 #include "../plugin/core/TabLedger.h" // v0.54: squad-tab owners kept with the save
 #include "../plugin/game/EngineFaults.h" // Phase 5c: fault throttle (pure inline)
 #include "../plugin/game/EngineCaps.h"   // Phase 5d: capability registry (pure inline)
@@ -817,6 +818,28 @@ static int xferRun(const char* name, const XferSrcFile* srcs, unsigned nsrc,
     dh.fileCount = (u16)nsrc;
     u16 of = 0; unsigned __int64 ob = 0;
     return savexfer::onSaveDone(dh, crcs.empty() ? (const u32*)0 : &crcs[0], &of, &ob);
+}
+
+// "Volver a jugar con <amigo>": the remembered friend's text file.
+static void testLastFriend() {
+    std::printf("== last friend (play again) ==\n");
+    LastFriend f;
+    f.id = 76561198012345678ULL; f.wasHost = true; f.name = "Ana \xC3\x91" "and\xC3\xBA";
+    LastFriend g;
+    CHECK("last friend: round-trip parses", parseLastFriend(formatLastFriend(f), &g));
+    CHECK("last friend: id kept", g.id == f.id);
+    CHECK("last friend: role kept", g.wasHost == true);
+    CHECK("last friend: UTF-8 name kept", g.name == f.name);
+    f.wasHost = false;
+    CHECK("last friend: join role", parseLastFriend(formatLastFriend(f), &g) && !g.wasHost);
+    CHECK("last friend: CRLF file", parseLastFriend("id=76561198012345678\r\nrole=join\r\nname=Bo\r\n", &g) && g.name == "Bo");
+    CHECK("last friend: no id", !parseLastFriend("role=host\nname=x\n", &g));
+    CHECK("last friend: not an individual account", !parseLastFriend("id=12345\nrole=host\n", &g));
+    CHECK("last friend: no role", !parseLastFriend("id=76561198012345678\nname=x\n", &g));
+    CHECK("last friend: line breaks stripped from the name", cleanFriendName("a\nb\tc") == "abc");
+    std::string longName(60, 'x');
+    longName[47] = '\xC3'; longName[48] = '\xA1';   // a 2-byte letter across the 48-byte cut
+    CHECK("last friend: long name cut before a split letter", cleanFriendName(longName).size() == 47);
 }
 
 // Every save name that builds a path from the network or a detour edge.
@@ -2263,6 +2286,7 @@ int main() {
     testSaveCrc();
     testFolderFingerprint();
     testSaveNames();
+    testLastFriend();
     testSaveXferRoundTrip();
     testContentHash();
     testInterp();

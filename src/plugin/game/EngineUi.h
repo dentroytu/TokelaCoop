@@ -72,6 +72,12 @@ struct CoopPanelState {
     // At the main menu, connected but not playing yet: 1 = HOST with a friend
     // already in (it must load a game), 2 = JOIN waiting for the host's world.
     int                waitNote;
+    // The friend of the last Steam session (core/LastFriend.h): id 0 = none.
+    // Offered as "Play again with <name>" while not connected; it connects over
+    // Steam to that id in the same role as last time.
+    unsigned long long lastFriendId;
+    const char*        lastFriendName;
+    bool               lastFriendWasHost;
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config

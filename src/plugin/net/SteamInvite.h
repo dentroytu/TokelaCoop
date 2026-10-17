@@ -77,6 +77,10 @@ enum StatusCode {
 int         statusCode();
 const char* statusArg();
 
+// The Steam name of a user we can see (a friend): copied into a buffer that stays
+// valid until the next call; "" when Steam is not up or the name is unknown.
+const char* personaName(SteamId id);
+
 // Leave any lobby and clear invite state (called on disconnect / teardown).
 void reset();
 

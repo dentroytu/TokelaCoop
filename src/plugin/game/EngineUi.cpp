@@ -418,6 +418,10 @@ unsigned long long      g_pickIds[MAX_PICK]  = {0};
 CoopInviteBeginFn       g_onInviteBegin  = 0;
 CoopInviteFriendFn      g_onInviteFriend = 0;
 std::string             g_peerModsCfg;  // friend's mod list (mods.cfg form), set each tick
+// "Play again with <name>": the last Steam session's friend and our role then,
+// refreshed every tick from the panel state.
+unsigned long long      g_rejoinId     = 0;
+bool                    g_rejoinHost   = false;
 
 // Button callbacks (free functions - MyGUI::newDelegate wraps them without any
 // raw-MyGUI link). A press changes panel state and requests a rebuild so the
@@ -439,6 +443,20 @@ void onConnBtn(DataPanelLine*) {
     g_panel.needsRebuild = true;
     coop::logLine(g_panel.connectedFlag ? "[coop-ui] connection -> ONLINE"
                                         : "[coop-ui] connection -> OFFLINE");
+}
+// "Play again with <name>": the manual Steam connection, filled in from the last
+// session - same role, the friend's Steam ID as the peer - and switched ONLINE.
+// The usual connect edge in coopPanelTick does the rest.
+void onRejoinBtn(DataPanelLine*) {
+    if (g_rejoinId == 0) return;
+    g_panel.hostFlag      = g_rejoinHost;
+    g_panel.steamFlag     = true;
+    g_pastedPeer          = g_rejoinId;
+    g_pasteFailed         = false;
+    g_panel.connectedFlag = true;
+    g_panel.needsRebuild  = true;
+    coop::logLine(g_rejoinHost ? "[coop-ui] play again with the last friend (as host)"
+                               : "[coop-ui] play again with the last friend (joining)");
 }
 // Main-view Disconnect / Cancel: same edge as the toggle, forced OFFLINE.
 void onDisconnectBtn(DataPanelLine*) {
@@ -528,7 +546,7 @@ void onPickBtn(DataPanelLine*) {
 enum RowKind { ROW_LINE, ROW_BUTTON, ROW_SPACE };
 enum RowAct {
     ACT_NONE, ACT_ROLE, ACT_TRANS, ACT_CONN, ACT_COPYID, ACT_PASTEID, ACT_COPYMODS,
-    ACT_INVITE, ACT_BACK, ACT_ADVANCED, ACT_DISCONNECT, ACT_PICK0
+    ACT_INVITE, ACT_BACK, ACT_ADVANCED, ACT_DISCONNECT, ACT_REJOIN, ACT_PICK0
 };
 enum RowCol { COL_WHITE, COL_GREY, COL_RED, COL_AMBER, COL_GREEN };
 
@@ -706,6 +724,7 @@ void bindButton(DataPanelLine_Button* b, int act) {
     case ACT_BACK:       b->callback = MyGUI::newDelegate(&onBackBtn); break;
     case ACT_ADVANCED:   b->callback = MyGUI::newDelegate(&onAdvancedBtn); break;
     case ACT_DISCONNECT: b->callback = MyGUI::newDelegate(&onDisconnectBtn); break;
+    case ACT_REJOIN:     b->callback = MyGUI::newDelegate(&onRejoinBtn); break;
     case ACT_PICK0 + 0:  b->callback = MyGUI::newDelegate(&onPickBtn<0>); break;
     case ACT_PICK0 + 1:  b->callback = MyGUI::newDelegate(&onPickBtn<1>); break;
     case ACT_PICK0 + 2:  b->callback = MyGUI::newDelegate(&onPickBtn<2>); break;
@@ -773,6 +792,8 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
     g_uiThread       = GetCurrentThreadId();
     g_onInviteBegin  = onInviteBegin;
     g_onInviteFriend = onInviteFriend;
+    g_rejoinId       = st->lastFriendId;
+    g_rejoinHost     = st->lastFriendWasHost;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
     { static void* s_last = (void*)-1;
       if ((void*)g != s_last) { s_last = (void*)g;
@@ -949,6 +970,20 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                 addButton(rows, L("Copiar la lista de mods de tu amigo", "Copy friend's mod list"), ACT_COPYMODS);
         }
         addSpace(rows);
+        // The last Steam session's friend, one click away: both press it.
+        if (!st->running && st->lastFriendId != 0 && st->selfSteamId != 0) {
+            const std::string nm = (st->lastFriendName && st->lastFriendName[0])
+                                       ? std::string(st->lastFriendName)
+                                       : std::string(L("tu amigo", "your friend"));
+            addButton(rows, std::string(L("Volver a jugar con ", "Play again with ")) + nm, ACT_REJOIN);
+            addLine(rows, st->lastFriendWasHost
+                              ? L("Abres tu partida para tu amigo; que pulse lo mismo en su F2.",
+                                  "You host again; your friend presses the same in their F2.")
+                              : L("Entras en su partida cuando tu amigo pulse lo mismo en su F2.",
+                                  "You join their game once your friend presses the same in their F2."),
+                    COL_GREY);
+            addSpace(rows);
+        }
         if (canInvite) {
             addButton(rows, L("Invitar a un amigo de Steam", "Invite a Steam friend"), ACT_INVITE);
             addLine(rows, L("Tu amigo acepta la invitaci\xC3\xB3n en Steam y entr\xC3\xA1is los dos.",

@@ -33,6 +33,7 @@
 #include "core/CrashDump.h"
 #include "core/OwnRanks.h"
 #include "core/Inbound.h"
+#include "core/LastFriend.h"   // "Volver a jugar con <amigo>" (F2)
 #include "core/ModList.h"      // protocol 56: active-mod list diff
 #include "core/Refusal.h"      // why a connection is not up, worded for the player
 #include "core/UiLang.h"       // L(es, en): player-facing text language
@@ -214,6 +215,10 @@ coop::u32    g_loadNackId       = 0;
 coop::u32    g_loadNackFp       = 0;
 DWORD        g_loadNackTick     = 0;
 int          g_loadNackTries    = 0;
+// The friend of the last Steam session (core/LastFriend.h), for "Volver a jugar
+// con <nombre>" on F2: loaded once, written on every Steam connect edge.
+coop::LastFriend g_lastFriend;
+bool         g_lastFriendLoaded = false;
 // A short line on the banner about saving and loading, until g_noticeUntil.
 std::string  g_notice;
 int          g_noticeState      = 2;
@@ -677,6 +682,20 @@ void processNetEvents(GameWorld* gw) {
         else coopLog("[latejoin] connect edge seen, resync OFF (gate)");
         g_peerPresent = true;
         sendModList(); // protocol 56: the peer diffs it against its own
+        // Remember who this was, for "Volver a jugar con <nombre>" next time
+        // (Steam sessions only: the id is what the button connects to).
+        if (g_cfg.transport == "steam" && g_cfg.steamPeer != 0) {
+            coop::LastFriend lf;
+            lf.id      = g_cfg.steamPeer;
+            lf.wasHost = g_cfg.isHost;
+            lf.name    = coop::steaminvite::personaName(g_cfg.steamPeer);
+            if (lf.name.empty() && lf.id == g_lastFriend.id) lf.name = g_lastFriend.name;
+            const bool saved = coop::saveLastFriend(lf);
+            g_lastFriend = lf;
+            g_lastFriendLoaded = true;
+            coopLog(saved ? "[coop-ui] friend remembered for 'play again'"
+                          : "[coop-ui] could not remember the friend (file not written)");
+        }
         // Coordinated save (protocol 31): while connected under save-sync,
         // the JOIN never writes a save locally - the host's save is
         // authoritative and a local save press forwards as PKT_SAVE_REQ.
@@ -1600,6 +1619,13 @@ void coopPanelDrive(bool atTitle) {
     ps.inviteArg    = coop::steaminvite::statusArg();
     ps.friendN      = friendN;
     ps.friends      = s_friends;
+    if (!g_lastFriendLoaded) {
+        g_lastFriendLoaded = true;
+        if (coop::loadLastFriend(&g_lastFriend)) coopLog("[coop-ui] last friend remembered: play-again offered on F2");
+    }
+    ps.lastFriendId      = g_lastFriend.id;
+    ps.lastFriendName    = g_lastFriend.name.c_str();
+    ps.lastFriendWasHost = g_lastFriend.wasHost;
 
     coop::engine::coopPanelTick(&ps, &coopUiConnect, &coopUiDisconnect,
                                 &coop::steaminvite::beginInvite,
