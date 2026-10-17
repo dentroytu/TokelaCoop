@@ -136,6 +136,7 @@ bool               g_weAreHost    = false;// created the lobby (vs joined a frie
 bool               g_hostFired    = false;// host already connected to the arrived friend
 bool               g_creating     = false;// CreateLobby call in flight
 bool               g_picker       = false;// in-panel friend picker is active
+bool               g_open         = false;// openToFriends: lobby open for "Join Game"
 unsigned long long g_pendingInvitee = 0;  // friend clicked before the lobby existed
 char               g_status[128]  = {0};
 int                g_statusCode   = 0;    // ST_* (steaminvite.h) for the localized panel
@@ -224,6 +225,13 @@ void onLobbyCreated(LobbyCreated_t* r, bool ioFailure) {
         setCode(ST_LOBBY_FAILED);
         return;
     }
+    if (!g_open && !g_picker && g_pendingInvitee == 0) {
+        // Nobody wants it any more: we joined a friend's game while it was being
+        // created (onGameLobbyJoinRequested). Leave it; stay the joiner.
+        if (g_leaveLobby) g_leaveLobby(g_mm, r->m_ulSteamIDLobby);
+        steamLog("lobby created after we joined a friend's game - left it");
+        return;
+    }
     g_lobby     = r->m_ulSteamIDLobby;
     g_weAreHost = true;
     g_hostFired = false;
@@ -249,6 +257,9 @@ void onLobbyCreated(LobbyCreated_t* r, bool ioFailure) {
         steamLog(c);
         setStatus("Invite sent - waiting for friend to accept...");
         if (g_statusCode != ST_INVITED) setCode(ST_INVITE_SENT);
+    } else if (g_open && !g_picker) {
+        setStatus("Open to friends - they can Join Game from the Steam friends list");
+        setCode(ST_OPEN);
     } else {
         setStatus("Pick a friend to invite");
         setCode(ST_PICK);
@@ -259,6 +270,13 @@ void onGameLobbyJoinRequested(GameLobbyJoinRequested_t* r) {
     if (!r || !g_joinLobby) return;
     // The friend clicked our invite / "Join Game". Enter their lobby; the actual
     // connect happens in onLobbyEnter once membership + owner are known.
+    // Joining ends our own open game / picker: leave our lobby so this side is
+    // only the joiner (and the panel stops saying "open to friends").
+    if (g_weAreHost && g_lobby != 0 && g_leaveLobby) g_leaveLobby(g_mm, g_lobby);
+    if (g_weAreHost) g_lobby = 0;
+    g_open    = false;
+    g_picker  = false;
+    g_pendingInvitee = 0;
     g_weAreHost = false;
     g_hostFired = false;
     char b[96];
@@ -448,6 +466,24 @@ void beginInvite() {
     steamLog("friend picker opened");
 }
 
+void openToFriends() {
+    if (!g_ready) {
+        steamLog("openToFriends: Steam invite layer not ready");
+        setStatus("Steam unavailable - type the ID instead");
+        setCode(ST_NO_STEAM);
+        return;
+    }
+    g_open = true;
+    createLobbyIfNeeded();   // no-op if one exists or is being created
+    setStatus("Open to friends - they can Join Game from the Steam friends list");
+    setCode(ST_OPEN);
+    steamLog("game opened to Steam friends (Join Game from the friends list)");
+}
+
+bool lobbyOpen() {
+    return g_ready && (g_open || g_picker) && !g_hostFired && (g_lobby != 0 || g_creating);
+}
+
 void inviteFriend(SteamId id) {
     if (!g_ready || id == 0) return;
     createLobbyIfNeeded(); // no-op if already have one / creating
@@ -546,6 +582,7 @@ void reset() {
     g_hostFired = false;
     g_creating  = false;
     g_picker    = false;
+    g_open      = false;
     g_pendingInvitee = 0;
     g_friendN   = 0;
     g_status[0] = '\0';

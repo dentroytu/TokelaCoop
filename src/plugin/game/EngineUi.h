@@ -80,6 +80,9 @@ struct CoopPanelState {
     bool               lastFriendWasHost;
     // A newer release on GitHub ("v0.59"), or "" / null (core/UpdateCheck.h).
     const char*        newVersion;
+    // The host's Steam lobby is open and nobody joined yet (steaminvite::lobbyOpen):
+    // a friend can "Join Game" from the Steam friends list.
+    bool               lobbyOpen;
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config
@@ -88,9 +91,12 @@ typedef void (*CoopConnectFn)(bool isHost, bool useSteam, unsigned long long pee
 typedef void (*CoopDisconnectFn)();
 typedef void (*CoopInviteBeginFn)();                    // open picker + create lobby
 typedef void (*CoopInviteFriendFn)(unsigned long long); // send a lobby invite
+// onOpenToFriends opens the host's lobby for "Join Game" from the Steam friends
+// list (no friend picked); onCloseLobby closes it again.
 void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                    CoopDisconnectFn onDisconnect, CoopInviteBeginFn onInviteBegin,
-                   CoopInviteFriendFn onInviteFriend);
+                   CoopInviteFriendFn onInviteFriend, CoopInviteBeginFn onOpenToFriends,
+                   CoopDisconnectFn onCloseLobby);
 
 // Persistent co-op connection-status banner: a single screen-space label fixed 10
 // px in from the top-left corner (a createFloatingLabel MyGUI::Window on the

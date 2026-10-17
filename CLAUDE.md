@@ -14,8 +14,9 @@ TokelaCoop no se activa y avisa.
 > **Estado (2026-10-17):**
 > - Compilación verificada en CI (`windows-2022`): `prototest`, `tunneltest`, DLL Harness y Release, y kit con instalador.
 >   Releases publicadas: `v0.52` y `v0.53` (con el nombre KenshiCoop), `v0.54` (TokelaCoop, 2026-10-10, protocolo 57),
->   `v0.55` (2026-10-17, protocolo 58), `v0.56` (2026-10-17, protocolo 59: despedir personajes) y `v0.57`
->   (2026-10-17, mismo protocolo 59: revisión de guardar y cargar) y `v0.58` (protocolo 59: "Volver a jugar con <amigo>").
+>   `v0.55` (2026-10-17, protocolo 58), `v0.56` (2026-10-17, protocolo 59: despedir personajes), y con el mismo
+>   protocolo 59 `v0.57` (revisión de guardar y cargar), `v0.58` ("Volver a jugar con <amigo>"), `v0.59` (aviso de
+>   versión nueva) y `v0.60` (abrir la partida a los amigos de Steam: "Unirse a la partida" desde su lista de amigos).
 > - **Verificado en el juego** (PC del autor del fork, Kenshi de Steam con RE_Kenshi):
 >   - v0.57 (2026-10-17): el amigo guarda y carga (`join_saveload`), la copia llega con el amigo en partida y la
 >     replicación en pausa (`load_stream`), el envío real al conectar (`stream_test.ps1`, 37 archivos, badCrc=0), y
@@ -62,18 +63,16 @@ TokelaCoop no se activa y avisa.
      sin él, el launcher de Kenshi falla con "no se encontró mfc100u.dll";
    - `scripts\fetch_deps.ps1` (no necesita administrador);
    - `scripts\build_plugin.cmd`.
-3. **Con el amigo (2 cuentas de Steam):** invitación completa desde "Invitar a un amigo de Steam", comprobación de mods y sesión larga.
+3. **Con el amigo (2 cuentas de Steam):** invitación completa desde "Invitar a un amigo de Steam", "Unirse a la partida"
+   desde la lista de amigos de Steam con la partida abierta (v0.60), comprobación de mods y sesión larga.
 4. **Instalador:** instalación de RE_Kenshi desde cero y un Kenshi que no esté en `C:`.
-5. **Hoja de ruta** (`docs/MODS_Y_FACILIDAD.md` §5):
-   - error de versión visible, con el motivo en la desconexión, sin reintentos infinitos y mostrado en F2;
-   - "Reconectar con <amigo>";
-   - unirse desde la lista de amigos de Steam;
-   - aviso de versión nueva;
-   - Steam Workshop.
+5. **Hoja de ruta** (`docs/MODS_Y_FACILIDAD.md` §5): hechos el error de versión visible (`core/Refusal.h`),
+   "Volver a jugar con <amigo>" (v0.58), el aviso de versión nueva (v0.59) y unirse desde la lista de amigos de
+   Steam (v0.60). Queda Steam Workshop.
 
 Flujo de trabajo:
 - una rama por cambio, PR y fusión cuando el CI está en verde;
-- las releases se publican con una etiqueta `vX.YY` (última: `v0.58`), que tiene que coincidir con
+- las releases se publican con una etiqueta `vX.YY` (última: `v0.60`), que tiene que coincidir con
   `TOKELACOOP_VERSION` de `src/netproto/Version.h` (el CI rechaza la etiqueta si no);
 - el dueño prefiere español y una UX muy sencilla.
 
@@ -271,6 +270,13 @@ powershell -ExecutionPolicy Bypass -File scripts\regress.ps1 -Tier full -SkipBui
   `TOKELACOOP_VERSION`, F2 lo dice con un botón a la página de descarga (`ShellExecuteA`) y el banner lo indica sin
   conectar. `"checkUpdates": false` (o `TOKELACOOP_UPDATE_CHECK=0`) lo apaga; el harness nunca lo hace. Probado en el
   juego con una DLL que decía ser v0.57 (detecta la v0.58 en 0,2 s; el botón abre la página).
+- **Abrir la partida a los amigos de Steam** (v0.60, `steaminvite::openToFriends`/`lobbyOpen`, botones
+  `ACT_OPENLOBBY`/`ACT_CLOSELOBBY` de `game/EngineUi.cpp`): crea el mismo lobby "solo amigos" de 2 plazas que la
+  invitación, sin elegir a nadie. Mientras está abierto, un amigo con Kenshi ya abierto pulsa "Unirse a la partida"
+  en la lista de amigos de Steam; su juego recibe `GameLobbyJoinRequested`, igual que al aceptar una invitación, y el
+  host se conecta al primer miembro que entra (`tick()`). Al unirse a la partida de otro se abandona el lobby propio
+  (y uno que llegue tarde de `CreateLobby` se abandona al crearse). Probado en el juego: abrir, el estado "Esperando a
+  tu amigo..." y cerrar; "Unirse a la partida" de verdad necesita la otra cuenta de Steam.
 - **Autoridad:** el host es autoritativo del mundo (NPCs, facciones, tiempo, dinero, edificios);
   cada cliente lo es de **su propio squad**. Las acciones sobre cosas que no posees viajan como
   *intents* (p. ej. `PKT_INV_XFER`) al dueño.

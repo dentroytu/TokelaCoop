@@ -460,6 +460,20 @@ void onRejoinBtn(DataPanelLine*) {
     coop::logLine(g_rejoinHost ? "[coop-ui] play again with the last friend (as host)"
                                : "[coop-ui] play again with the last friend (joining)");
 }
+// "Open my game to Steam friends" / its Cancel: the friends-only lobby a friend
+// joins from the Steam friends list ("Join Game").
+CoopInviteBeginFn g_onOpenToFriends = 0;
+CoopDisconnectFn  g_onCloseLobby    = 0;
+void onOpenLobbyBtn(DataPanelLine*) {
+    coop::logLine("[coop-ui] open the game to Steam friends");
+    if (g_onOpenToFriends) g_onOpenToFriends();
+    g_panel.needsRebuild = true;
+}
+void onCloseLobbyBtn(DataPanelLine*) {
+    coop::logLine("[coop-ui] close the game to Steam friends");
+    if (g_onCloseLobby) g_onCloseLobby();
+    g_panel.needsRebuild = true;
+}
 // "Open the download page": the latest release on GitHub, in the default browser.
 void onUpdateBtn(DataPanelLine*) {
     const HINSTANCE r = ShellExecuteA(0, "open", coop::update::downloadPage(), 0, 0, SW_SHOWNORMAL);
@@ -554,7 +568,8 @@ void onPickBtn(DataPanelLine*) {
 enum RowKind { ROW_LINE, ROW_BUTTON, ROW_SPACE };
 enum RowAct {
     ACT_NONE, ACT_ROLE, ACT_TRANS, ACT_CONN, ACT_COPYID, ACT_PASTEID, ACT_COPYMODS,
-    ACT_INVITE, ACT_BACK, ACT_ADVANCED, ACT_DISCONNECT, ACT_REJOIN, ACT_UPDATE, ACT_PICK0
+    ACT_INVITE, ACT_BACK, ACT_ADVANCED, ACT_DISCONNECT, ACT_REJOIN, ACT_UPDATE,
+    ACT_OPENLOBBY, ACT_CLOSELOBBY, ACT_PICK0
 };
 enum RowCol { COL_WHITE, COL_GREY, COL_RED, COL_AMBER, COL_GREEN };
 
@@ -734,6 +749,8 @@ void bindButton(DataPanelLine_Button* b, int act) {
     case ACT_DISCONNECT: b->callback = MyGUI::newDelegate(&onDisconnectBtn); break;
     case ACT_REJOIN:     b->callback = MyGUI::newDelegate(&onRejoinBtn); break;
     case ACT_UPDATE:     b->callback = MyGUI::newDelegate(&onUpdateBtn); break;
+    case ACT_OPENLOBBY:  b->callback = MyGUI::newDelegate(&onOpenLobbyBtn); break;
+    case ACT_CLOSELOBBY: b->callback = MyGUI::newDelegate(&onCloseLobbyBtn); break;
     case ACT_PICK0 + 0:  b->callback = MyGUI::newDelegate(&onPickBtn<0>); break;
     case ACT_PICK0 + 1:  b->callback = MyGUI::newDelegate(&onPickBtn<1>); break;
     case ACT_PICK0 + 2:  b->callback = MyGUI::newDelegate(&onPickBtn<2>); break;
@@ -761,6 +778,7 @@ std::string inviteStatusText(int code, const char* arg) {
                      "Your friend has a different TokelaCoop version. Install the same one.");
     case 8: return L("Steam no est\xC3\xA1 disponible. Abre Kenshi desde Steam.",
                      "Steam is not available. Start Kenshi from Steam.");
+    case 10: return std::string();   // open to friends: worded by the main view
     default: return std::string();
     }
 }
@@ -796,11 +814,14 @@ void clearRowPointers() {
 
 void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                    CoopDisconnectFn onDisconnect, CoopInviteBeginFn onInviteBegin,
-                   CoopInviteFriendFn onInviteFriend) {
+                   CoopInviteFriendFn onInviteFriend, CoopInviteBeginFn onOpenToFriends,
+                   CoopDisconnectFn onCloseLobby) {
     if (!st) return;
     g_uiThread       = GetCurrentThreadId();
     g_onInviteBegin  = onInviteBegin;
     g_onInviteFriend = onInviteFriend;
+    g_onOpenToFriends = onOpenToFriends;
+    g_onCloseLobby    = onCloseLobby;
     g_rejoinId       = st->lastFriendId;
     g_rejoinHost     = st->lastFriendWasHost;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
@@ -890,6 +911,9 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             st->lastFriendName && st->lastFriendName[0])
             waitLine = std::string(L("Que ", "Ask ")) + st->lastFriendName +
                        L(" pulse \xC2\xABVolver a jugar\xC2\xBB en su F2.", " to press \"Play again\" in their F2.");
+    } else if (st->lobbyOpen) {
+        status = L("Esperando a tu amigo...", "Waiting for your friend...");
+        statusCol = COL_AMBER;
     } else {
         status = L("Sin conectar", "Not connected");
         statusCol = COL_RED;
@@ -921,6 +945,10 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
         if (pickN == 0)
             addLine(rows, L("Ning\xC3\xBAn amigo conectado a Steam ahora mismo.", "No friends online on Steam right now."),
                     COL_GREY);
+        addLine(rows, L("Tambi\xC3\xA9n puede entrar sin invitaci\xC3\xB3n: \xC2\xABUnirse a la partida\xC2\xBB",
+                        "They can also join without an invite: \"Join Game\""), COL_GREY);
+        addLine(rows, L("en tu nombre, en su lista de amigos de Steam.",
+                        "on you in their Steam friends list."), COL_GREY);
         addSpace(rows);
         addButton(rows, L("Volver", "Back"), ACT_BACK);
     } else if (g_panel.view == VIEW_ADVANCED) {
@@ -1006,17 +1034,42 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                     COL_GREY);
             addSpace(rows);
         }
+        // The host's lobby is open: a friend joins from the Steam friends list.
+        if (st->lobbyOpen && !st->peerPresent) {
+            addLine(rows, L("Tu partida est\xC3\xA1 abierta a tus amigos de Steam.",
+                            "Your game is open to your Steam friends."), COL_GREEN);
+            // Short lines: a wrapped part that ends up a hair too wide for its
+            // row breaks inside the row and leaves a gap under it.
+            addLine(rows, L("Tu amigo, con Kenshi abierto, hace clic derecho en tu nombre",
+                            "Your friend, with Kenshi open, right-clicks you"), COL_GREY);
+            addLine(rows, L("en su lista de amigos de Steam y pulsa \xC2\xABUnirse a la partida\xC2\xBB.",
+                            "in their Steam friends list and picks \"Join Game\"."), COL_GREY);
+            addButton(rows, L("Cerrar la partida a mis amigos", "Close my game to friends"), ACT_CLOSELOBBY);
+            addSpace(rows);
+        }
         if (canInvite) {
             addButton(rows, L("Invitar a un amigo de Steam", "Invite a Steam friend"), ACT_INVITE);
             addLine(rows, L("Tu amigo acepta la invitaci\xC3\xB3n en Steam y entr\xC3\xA1is los dos.",
                             "Your friend accepts the Steam invite and you both connect."), COL_GREY);
+            if (!st->lobbyOpen) {
+                addButton(rows, L("Abrir mi partida a mis amigos de Steam", "Open my game to Steam friends"),
+                          ACT_OPENLOBBY);
+                addLine(rows, L("Sin invitaci\xC3\xB3n: tu amigo pulsa \xC2\xABUnirse a la partida\xC2\xBB",
+                                "No invite needed: your friend picks \"Join Game\""), COL_GREY);
+                addLine(rows, L("en tu nombre, en su lista de amigos de Steam.",
+                                "on you in their Steam friends list."), COL_GREY);
+            }
         } else if (!st->inviteReady && !st->running) {
             addLine(rows, L("Steam no est\xC3\xA1 disponible: abre Kenshi desde Steam o usa Opciones avanzadas.",
                             "Steam is not available: start Kenshi from Steam or use Advanced options."), COL_AMBER);
         }
         if (!st->running) {
-            addLine(rows, L("\xC2\xBFTe han invitado? Acepta la invitaci\xC3\xB3n de Steam (con Kenshi abierto; vale el men\xC3\xBA).",
-                            "Invited? Accept the Steam invite (with Kenshi open; the main menu is fine)."), COL_GREY);
+            addLine(rows, L("\xC2\xBFTe han invitado? Acepta la invitaci\xC3\xB3n de Steam (vale el men\xC3\xBA).",
+                            "Invited? Accept the Steam invite (the main menu is fine)."), COL_GREY);
+            addLine(rows, L("\xC2\xBFTu amigo ha abierto su partida? En tu lista de amigos de Steam,",
+                            "Friend opened their game? In your Steam friends list,"), COL_GREY);
+            addLine(rows, L("clic derecho en su nombre y \xC2\xABUnirse a la partida\xC2\xBB.",
+                            "right-click them and pick \"Join Game\"."), COL_GREY);
         } else {
             addButton(rows, st->refuseFinal ? L("Entendido", "OK")
                             : (st->peerPresent || st->waitNote) ? L("Desconectar", "Disconnect")

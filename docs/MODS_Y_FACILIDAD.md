@@ -141,6 +141,10 @@ Empezar mínimo y ampliar solo con lo que se haya probado: **KenshiCoop + Dark U
 | 7 | **"Reconectar con <amigo>"**: recordar el último par y que el host reabra el lobby (§3.3). | S-M | Medio-alto | Compila en CI. Prueba en Windows. |
 | 8 | **Steam Workshop**: publicar KenshiCoop (actualiza solo y deja a los dos en la misma versión) más la colección "co-op pack". El instalador se reduce a RE_Kenshi y la comprobación (§2.C). | M | Muy alto | No: el FCS o steamcmd necesitan Windows y cuenta de Steam. |
 
+**Estado (2026-10-17):** hechos del 2 al 7. La invitación llegó en la v0.52, "Volver a jugar con <amigo>" en la v0.58 y
+"Unirse a la partida" desde la lista de amigos de Steam en la v0.60 (botón "Abrir mi partida a mis amigos de Steam").
+Del 1 solo está probado Kenshi 1.0.65 de Steam. Falta el 8.
+
 ### Fuentes externas
 
 - RE_Kenshi: [GitHub](https://github.com/BFrizzleFoShizzle/RE_Kenshi), [Releases](https://github.com/BFrizzleFoShizzle/RE_Kenshi/releases), [Plugins.cpp](https://github.com/BFrizzleFoShizzle/RE_Kenshi/blob/master/Plugins.cpp), [Nexus 847](https://www.nexusmods.com/kenshi/mods/847) (devuelve 403: permisos sin verificar)
