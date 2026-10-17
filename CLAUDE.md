@@ -13,7 +13,7 @@ TokelaCoop no se activa y avisa.
 
 > **Estado (2026-10-17):**
 > - Compilación verificada en CI (`windows-2022`): `prototest`, `tunneltest`, DLL Harness y Release, y kit con instalador.
->   Releases publicadas: `v0.52` y `v0.53` (con el nombre KenshiCoop), `v0.54` (TokelaCoop, 2026-10-10, protocolo 57)
+>   Releases publicadas: `v0.52` y `v0.53` (con el nombre KenshiCoop), `v0.54` (TokelaCoop, 2026-10-10, protocolo 57),
 >   `v0.55` (2026-10-17, protocolo 58) y `v0.56` (2026-10-17, protocolo 59: despedir personajes).
 > - **Verificado en el juego** (PC del autor del fork, Kenshi de Steam con RE_Kenshi):
 >   - v0.56 (2026-10-17): despedir por la pantalla de escuadras real (la prueba abre la pestaña 4) se refleja en el
