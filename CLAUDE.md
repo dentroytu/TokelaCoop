@@ -14,8 +14,12 @@ TokelaCoop no se activa y avisa.
 > **Estado (2026-10-17):**
 > - Compilación verificada en CI (`windows-2022`): `prototest`, `tunneltest`, DLL Harness y Release, y kit con instalador.
 >   Releases publicadas: `v0.52` y `v0.53` (con el nombre KenshiCoop), `v0.54` (TokelaCoop, 2026-10-10, protocolo 57)
->   y `v0.55` (2026-10-17, protocolo 58).
+>   `v0.55` (2026-10-17, protocolo 58) y `v0.56` (2026-10-17, protocolo 59: despedir personajes).
 > - **Verificado en el juego** (PC del autor del fork, Kenshi de Steam con RE_Kenshi):
+>   - v0.56 (2026-10-17): despedir por la pantalla de escuadras real (la prueba abre la pestaña 4) se refleja en el
+>     otro juego y no vuelve al guardar y cargar (`dismiss_sync`; `dismiss_sync_off` reproduce el fallo antiguo), y
+>     despedir a un personaje del amigo se rechaza. Regresión de 26 pruebas (básicas + escuadras, guardar/cargar,
+>     reclutar, reconexión): todo pasa; `npc_sync` solo al reintentar, como antes;
 >   - v0.55 (2026-10-17): el amigo que pasa a "Unirse" desde F2 hace daño a los NPCs (`pc_assault_ui`, 11 golpes de 11)
 >     y las tiendas siguen sincronizadas (`store_sync_ui`); copias de seguridad y el HELLO con la versión, en los logs.
 >     `npc_sync` falla también con la v0.54 (comprobado A/B): es inestabilidad anterior;
@@ -65,7 +69,7 @@ TokelaCoop no se activa y avisa.
 
 Flujo de trabajo:
 - una rama por cambio, PR y fusión cuando el CI está en verde;
-- las releases se publican con una etiqueta `vX.YY` (última: `v0.55`), que tiene que coincidir con
+- las releases se publican con una etiqueta `vX.YY` (última: `v0.56`), que tiene que coincidir con
   `TOKELACOOP_VERSION` de `src/netproto/Version.h` (el CI rechaza la etiqueta si no);
 - el dueño prefiere español y una UX muy sencilla.
 
