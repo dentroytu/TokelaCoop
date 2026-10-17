@@ -273,6 +273,11 @@ void loadConfig(Config& c) {
         std::string ac = envOr("TOKELACOOP_AUTOCONNECT", fileOr(f, "autoConnect", "0").c_str());
         c.autoConnect = (ac == "1" || ac == "true");
     }
+    // New-version notice (core/UpdateCheck.h): on unless the file says false.
+    {
+        std::string uc = envOr("TOKELACOOP_UPDATE_CHECK", fileOr(f, "checkUpdates", "1").c_str());
+        c.checkUpdates = !(uc == "0" || uc == "false");
+    }
 
     // Protocol 36 movement-smoothness knobs. Defaults are the historical
     // constants; any positive env value overrides for live A/B tuning.

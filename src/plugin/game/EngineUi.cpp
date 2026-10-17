@@ -27,10 +27,12 @@
 #include <mygui/MyGUI_FontManager.h>     // accented fonts: MyGUI's default font
 #include <mygui/MyGUI_IFont.h>           // panel line wrapping: glyph advances
 #include <windows.h>
+#include <shellapi.h> // ShellExecuteA: the new-version button opens the download page
 
 #include "../core/SteamId.h" // parseSteamId64 (paste button) + maskSteamId64 (id rows)
 #include "../core/UiLang.h" // L(es, en): panel text in the player's language
 #include "../core/TextWrap.h" // one panel row per wrapped line
+#include "../core/UpdateCheck.h" // downloadPage(): the new-version button
 #include "../../netproto/Version.h" // TOKELACOOP_TITLE: the panel title
 #include <fstream>
 #include <iterator>
@@ -458,6 +460,12 @@ void onRejoinBtn(DataPanelLine*) {
     coop::logLine(g_rejoinHost ? "[coop-ui] play again with the last friend (as host)"
                                : "[coop-ui] play again with the last friend (joining)");
 }
+// "Open the download page": the latest release on GitHub, in the default browser.
+void onUpdateBtn(DataPanelLine*) {
+    const HINSTANCE r = ShellExecuteA(0, "open", coop::update::downloadPage(), 0, 0, SW_SHOWNORMAL);
+    coop::logLine((INT_PTR)r > 32 ? "[coop-ui] opened the download page"
+                                  : "[coop-ui] could not open the download page");
+}
 // Main-view Disconnect / Cancel: same edge as the toggle, forced OFFLINE.
 void onDisconnectBtn(DataPanelLine*) {
     g_panel.connectedFlag = false;
@@ -546,7 +554,7 @@ void onPickBtn(DataPanelLine*) {
 enum RowKind { ROW_LINE, ROW_BUTTON, ROW_SPACE };
 enum RowAct {
     ACT_NONE, ACT_ROLE, ACT_TRANS, ACT_CONN, ACT_COPYID, ACT_PASTEID, ACT_COPYMODS,
-    ACT_INVITE, ACT_BACK, ACT_ADVANCED, ACT_DISCONNECT, ACT_REJOIN, ACT_PICK0
+    ACT_INVITE, ACT_BACK, ACT_ADVANCED, ACT_DISCONNECT, ACT_REJOIN, ACT_UPDATE, ACT_PICK0
 };
 enum RowCol { COL_WHITE, COL_GREY, COL_RED, COL_AMBER, COL_GREEN };
 
@@ -725,6 +733,7 @@ void bindButton(DataPanelLine_Button* b, int act) {
     case ACT_ADVANCED:   b->callback = MyGUI::newDelegate(&onAdvancedBtn); break;
     case ACT_DISCONNECT: b->callback = MyGUI::newDelegate(&onDisconnectBtn); break;
     case ACT_REJOIN:     b->callback = MyGUI::newDelegate(&onRejoinBtn); break;
+    case ACT_UPDATE:     b->callback = MyGUI::newDelegate(&onUpdateBtn); break;
     case ACT_PICK0 + 0:  b->callback = MyGUI::newDelegate(&onPickBtn<0>); break;
     case ACT_PICK0 + 1:  b->callback = MyGUI::newDelegate(&onPickBtn<1>); break;
     case ACT_PICK0 + 2:  b->callback = MyGUI::newDelegate(&onPickBtn<2>); break;
@@ -967,6 +976,14 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
         }
         if (!waitLine.empty()) addLine(rows, waitLine, COL_AMBER);
         if (!transfer.empty()) addLine(rows, transfer, COL_AMBER);
+        // A newer TokelaCoop on GitHub (core/UpdateCheck.h): both players need it.
+        if (st->newVersion && st->newVersion[0]) {
+            addLine(rows, std::string(L("Hay una versi\xC3\xB3n nueva de TokelaCoop: ", "A new TokelaCoop is out: ")) +
+                          st->newVersion + L(" (tienes la v", " (you have v") + TOKELACOOP_VERSION +
+                          L("). Instaladla los dos.", "). Both of you should install it."),
+                    COL_AMBER);
+            addButton(rows, L("Abrir la p\xC3\xA1gina de descarga", "Open the download page"), ACT_UPDATE);
+        }
         if (!inviteText.empty() && st->inviteCode != 1 && !st->refuseFinal)
             addLine(rows, inviteText, COL_WHITE);
         if (st->modsLine) {

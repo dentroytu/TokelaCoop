@@ -625,6 +625,10 @@ struct Config {
     // A test scenario or TOKELACOOP_TEST_SECONDS ALWAYS auto-starts regardless
     // (the unattended harness never touches the panel); see Plugin.cpp.
     bool               autoConnect;
+    // Ask GitHub once per run whether a newer TokelaCoop exists (core/UpdateCheck.h).
+    // "checkUpdates": false in coop_config.json (TOKELACOOP_UPDATE_CHECK=0) turns
+    // it off; a harness run never asks.
+    bool               checkUpdates;
 };
 
 // Read every TOKELACOOP_* var into 'out', applying host/join defaults. Values in

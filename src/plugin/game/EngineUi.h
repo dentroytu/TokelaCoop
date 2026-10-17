@@ -78,6 +78,8 @@ struct CoopPanelState {
     unsigned long long lastFriendId;
     const char*        lastFriendName;
     bool               lastFriendWasHost;
+    // A newer release on GitHub ("v0.59"), or "" / null (core/UpdateCheck.h).
+    const char*        newVersion;
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config

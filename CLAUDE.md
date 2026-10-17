@@ -266,6 +266,11 @@ powershell -ExecutionPolicy Bypass -File scripts\regress.ps1 -Tier full -SkipBui
   `%LOCALAPPDATA%\kenshi\TokelaCoop_amigo.txt`; sin conectar, F2 ofrece el botón, que hace la conexión manual por
   Steam con esos datos (el host espera a ese amigo, el amigo se conecta a ese host). Probado en el juego con un
   amigo de prueba (aparece, conecta como host al ID guardado, "Cancelar" vuelve al botón).
+- **Aviso de versión nueva** (v0.59, `core/UpdateCheck.h` + `net/UpdateCheck.cpp`, WinHTTP en un hilo aparte): una vez
+  por sesión se pide `api.github.com/repos/dentroytu/TokelaCoop/releases/latest`; si `tag_name` es mayor que
+  `TOKELACOOP_VERSION`, F2 lo dice con un botón a la página de descarga (`ShellExecuteA`) y el banner lo indica sin
+  conectar. `"checkUpdates": false` (o `TOKELACOOP_UPDATE_CHECK=0`) lo apaga; el harness nunca lo hace. Probado en el
+  juego con una DLL que decía ser v0.57 (detecta la v0.58 en 0,2 s; el botón abre la página).
 - **Autoridad:** el host es autoritativo del mundo (NPCs, facciones, tiempo, dinero, edificios);
   cada cliente lo es de **su propio squad**. Las acciones sobre cosas que no posees viajan como
   *intents* (p. ej. `PKT_INV_XFER`) al dueño.

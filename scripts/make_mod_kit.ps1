@@ -110,17 +110,22 @@ Write-Host "  .mod description: $((Get-ModInfo $kitMod).Description.Substring(0,
 @'
 {
   // TokelaCoop config. For a normal Steam game you do NOT need to edit this file:
-  // your friend's Steam ID is entered in-game (press F2, click "Copy my Steam ID"
-  // to share yours, then "Paste friend's Steam ID" to enter theirs), and nothing
-  // is written back to disk.
+  // invite your friend from F2, or swap Steam IDs there; after a session F2
+  // remembers them ("Volver a jugar con <amigo>", kept in
+  // %LOCALAPPDATA%\kenshi\TokelaCoop_amigo.txt). Nothing is written back here.
   //
   // This file only matters for a LAN / direct-UDP game: set "transport": "udp"
   // and put the host's address in "ip" (and "port" if you changed it). ip/port are
   // re-read each time you click Connect, so you can edit them without restarting.
+  //
+  // checkUpdates: once per run TokelaCoop asks GitHub which version is the latest
+  // (that request is all it sends) and F2 tells you when a newer one is out. Set
+  // it to false to never ask.
   "transport": "steam",
   "ip": "127.0.0.1",
   "port": 27800,
-  "autoConnect": false
+  "autoConnect": false,
+  "checkUpdates": true
 }
 '@ | Set-Content (Join-Path $modDir "coop_config.json") -Encoding UTF8
 

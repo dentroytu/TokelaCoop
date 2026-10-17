@@ -34,6 +34,7 @@
 #include "core/OwnRanks.h"
 #include "core/Inbound.h"
 #include "core/LastFriend.h"   // "Volver a jugar con <amigo>" (F2)
+#include "core/UpdateCheck.h"  // new-version notice (F2 + banner)
 #include "core/ModList.h"      // protocol 56: active-mod list diff
 #include "core/Refusal.h"      // why a connection is not up, worded for the player
 #include "core/UiLang.h"       // L(es, en): player-facing text language
@@ -1626,6 +1627,7 @@ void coopPanelDrive(bool atTitle) {
     ps.lastFriendId      = g_lastFriend.id;
     ps.lastFriendName    = g_lastFriend.name.c_str();
     ps.lastFriendWasHost = g_lastFriend.wasHost;
+    ps.newVersion        = coop::update::newerVersion();
 
     coop::engine::coopPanelTick(&ps, &coopUiConnect, &coopUiDisconnect,
                                 &coop::steaminvite::beginInvite,
@@ -1635,7 +1637,12 @@ void coopPanelDrive(bool atTitle) {
     // (just the name) while co-op is off, so a player can always see which
     // build is loaded: "TokelaCoop v0.54: conectado con tu amigo".
     const bool running = g_net.isRunning();
-    const std::string banner = running ? brandBanner(detail) : std::string(TOKELACOOP_TITLE "  (F2)");
+    std::string banner = running ? brandBanner(detail) : std::string(TOKELACOOP_TITLE "  (F2)");
+    // A newer release, said where every player looks - while not playing together
+    // (in a session the banner is the session's status).
+    if (!running && coop::update::newerVersion()[0])
+        banner += std::string(coop::L(" - hay versi\xC3\xB3n nueva: ", " - new version: ")) +
+                  coop::update::newerVersion();
     coop::engine::coopOverlayTick(banner.c_str(), running ? ostate : 3, true);   // 3: grey, co-op off
 }
 
@@ -3474,6 +3481,11 @@ __declspec(dllexport) void startPlugin() {
         warnOtherCopy(other);
         return;
     }
+
+    // Is there a newer TokelaCoop? Asked once, in the background, for a player's
+    // run only (a harness run never goes online for it).
+    if (g_cfg.checkUpdates && g_cfg.scenario.empty() && g_cfg.testSeconds == 0)
+        coop::update::start();
 
     // Hook the main-thread tick FIRST (early-return on failure), then wire the
     // replicator, engine detours and UI hooks as named install phases.

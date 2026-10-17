@@ -1,9 +1,9 @@
 # TokelaCoop
 
-**Current version: v0.58.** Up to v0.53 this project was called **KenshiCoop**.
+**Current version: v0.59.** Up to v0.53 this project was called **KenshiCoop**.
 TokelaCoop is a modified fork of [nhoral/KenshiCoop](https://github.com/nhoral/KenshiCoop).
 In game, the top-left banner and the F2 panel title show the name and the
-version ("TokelaCoop v0.58"): check that you and your friend see the same one.
+version ("TokelaCoop v0.59"): check that you and your friend see the same one.
 
 Setup + Demo (upstream KenshiCoop): [https://www.youtube.com/watch?v=OqwVRRZEYGM](https://www.youtube.com/watch?v=OqwVRRZEYGM)
 
@@ -175,6 +175,11 @@ is needed after an edit.
   one shared save on both machines, streamed to the other side automatically.
   To resume next time, the host loads that save and goes online, and the join
   can reconnect straight from the main menu again.
+- **New versions (v0.59).** Once per run TokelaCoop asks GitHub which release is
+  the latest - that request is all it sends - and when a newer one is out, F2 and
+  the banner say so, with a button to the download page. Both players should
+  install it. Set `"checkUpdates": false` in `mods\TokelaCoop\coop_config.json`
+  to never ask.
 
 ### If something goes wrong
 
