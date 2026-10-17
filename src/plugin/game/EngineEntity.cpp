@@ -289,7 +289,7 @@ unsigned int captureSquad(GameWorld* gw, bool leaderOnly,
         unsigned int size = (unsigned int)gw->player->playerCharacters.size();
         for (unsigned int i = 0; i < size && n < maxOut; ++i) {
             Character* c = gw->player->playerCharacters[i];
-            if (!c) continue;
+            if (!c || rosterIgnored(c)) continue;   // a body we just dismissed
             // captureOne has its own __try; calling it here is fine.
             if (captureOne(c, &out[n])) ++n;
             if (leaderOnly) break;

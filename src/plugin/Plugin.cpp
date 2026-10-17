@@ -166,6 +166,14 @@ bool&        g_autoLoadDone    = g_session.autoLoadDone;
 DWORD&       g_titleFirstTick  = g_session.titleFirstTick;
 bool&        g_peerPresent     = g_session.peerPresent;
 coop::u32&   g_peerId          = g_session.peerId;
+
+// The dismissal hook's classifier: a friend's character is refused only while
+// the own-characters guard is on and the friend is connected (alone, every
+// character is the player's to dismiss).
+static int coopDismissOwnerClass(const unsigned int h[5]) {
+    if (!g_cfg.ownGuard || !g_peerPresent) return 1;
+    return g_repl.squadOwnerClassForHand(h);
+}
 // Active-mod list check (protocol 56) state, shown on the F2 panel/banner.
 std::string  g_modsLine;        // F2 "Mods" row ("" until the peer's list arrives)
 bool         g_modsWarn = false;
@@ -184,6 +192,11 @@ std::string& g_loadXferPending = g_session.loadXferPending;
 std::string& g_loadAfterCommit = g_session.loadAfterCommit;
 coop::u32&   g_loadCommitBase  = g_session.loadCommitBase;
 DWORD&       g_loadPumpArmTick  = g_session.loadPumpArmTick;
+// A streamed save gets one more try when the friend's copy fails its check
+// (Kenshi rewrote a file after the folder looked settled).
+std::string  g_saveRetryName;
+int          g_saveRetryLeft   = 0;
+bool         g_lastSendWasSave = false;
 
 // Scenario harness state. Harness/Debug builds only - the shipped Release DLL
 // excludes test/Scenario*.cpp and does not define TOKELACOOP_HARNESS (Phase 1).
@@ -736,6 +749,8 @@ void driveSaveSync() {
                 continue;
             }
             g_savePending = name;
+            g_saveRetryName = name;
+            g_saveRetryLeft = 1;
             coop::savexfer::armWatch(name);
         } else if (edges[i].suppressed && !edges[i].autosave) {
             coop::SaveReqPacket rq;
@@ -812,9 +827,10 @@ void driveSaveSync() {
                     g_bootstrapArmed = false;
                     g_bootstrapName.clear();
                     g_savePending.clear();
-                } else if (g_peerPresent)
-                    coop::savexfer::beginSend(g_net, g_net.localId(), g_savePending);
-                else
+                } else if (g_peerPresent) {
+                    if (coop::savexfer::beginSend(g_net, g_net.localId(), g_savePending))
+                        g_lastSendWasSave = true;
+                } else
                     coopLog("[save] no peer connected; transfer skipped");
             }
         }
@@ -835,6 +851,19 @@ void driveSaveSync() {
             b[sizeof(b) - 1] = '\0';
             if (it->pkt.ok) coopLog(b); else coopErr(b);
             coop::savexfer::noteAck(it->pkt.xferId, it->pkt.ok ? 1 : 0);
+            // The friend's copy failed its check: send the save once more once
+            // the folder holds still (a later save supersedes the retry).
+            if (!it->pkt.ok && g_lastSendWasSave && g_saveRetryLeft > 0 && !g_saveRetryName.empty() &&
+                it->pkt.xferId == coop::savexfer::lastSentXferId() && g_peerPresent &&
+                !coop::savexfer::watching() && !coop::savexfer::sending()) {
+                --g_saveRetryLeft;
+                g_savePending = g_saveRetryName;
+                coop::savexfer::armWatchRetry(g_savePending);
+                char rb[160];
+                _snprintf(rb, sizeof(rb) - 1, "[save] XFER-RETRY name='%s' (the friend's copy failed its check)",
+                          g_savePending.c_str());
+                rb[sizeof(rb) - 1] = '\0'; coopLog(rb);
+            }
         }
     } else {
         // Receiver half: stage, verify, commit, acknowledge (shared pump).
@@ -871,6 +900,7 @@ void driveLoadSync(GameWorld* gw) {
             // A load supersedes any in-flight save coordination.
             coop::savexfer::abortAll();
             g_savePending.clear();
+            g_saveRetryLeft = 0;
             coop::LoadGoPacket go;
             memset(&go, 0, sizeof(go));
             go.type        = (coop::u8)coop::PKT_LOAD_GO;
@@ -965,6 +995,7 @@ void driveLoadSync(GameWorld* gw) {
                       g_loadXferPending.c_str());
             b[sizeof(b) - 1] = '\0'; coopLog(b);
             coop::savexfer::beginSend(g_net, g_net.localId(), g_loadXferPending);
+            g_lastSendWasSave = false;   // not a save: no save retry for it
             g_loadXferPending.clear();
         }
         // The chunk pump normally lives in driveSaveSync; keep the fallback
@@ -1668,7 +1699,13 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
         const unsigned int dropped = coop::engine::unselectBodies(gw, peers, nPeer);
         unsigned int refusedChar = 0, refusedTab = 0;
         coop::engine::drainSquadScreenRefusals(&refusedChar, &refusedTab);
-        if (dropped > 0 || refusedChar > 0) {
+        const unsigned int refusedDismiss = coop::engine::takeDismissRefusals();
+        if (refusedDismiss > 0) {
+            char b[96];
+            _snprintf(b, sizeof(b) - 1, "[own] refused dismissing %u friend character(s)", refusedDismiss);
+            b[sizeof(b) - 1] = '\0'; coopLog(b);
+        }
+        if (dropped > 0 || refusedChar > 0 || refusedDismiss > 0) {
             g_ownNoticeUntil = GetTickCount() + 2500;
             g_ownNoticeKind = 1;
         } else if (refusedTab > 0) {
@@ -2856,6 +2893,16 @@ void installEngineDetours() {
     // is the A/B escape hatch (squad_probe forces it off to keep the unsynced
     // baseline measurable).
     g_repl.setSquadSync(g_cfg.squadSync);
+    // Dismissal sync (protocol 59): the hook reports our dismissals and refuses
+    // one of the friend's characters; the replicator mirrors the friend's.
+    g_repl.setDismissSync(g_cfg.squadSync && g_cfg.dismissSync);
+    if (g_cfg.squadSync) {
+        if (coop::engine::installDismissHook(&coopDismissOwnerClass, g_cfg.dismissSync))
+            coopLog(g_cfg.dismissSync ? "[squad] dismiss detour installed; dismissal sync ON"
+                                      : "[squad] dismiss detour installed; dismissal sync OFF (TOKELACOOP_DISMISS_SYNC=0)");
+        else
+            coopLog("[squad] FAILED to install the dismiss detour; dismissals are not mirrored");
+    }
     g_repl.setTabLedgerOn(g_cfg.tabLedger);
     g_repl.setFactionSync(g_cfg.factionSync);
     g_repl.setTimeSync(g_cfg.timeSync);

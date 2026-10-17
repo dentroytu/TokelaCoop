@@ -447,6 +447,9 @@ public:
     // never reshuffle existing ranks / flip whole-tab ownership); off = the
     // legacy per-tick sorted ranking (the squad_probe baseline).
     void setSquadSync(bool v) { squadSync_ = v; }
+    // Dismissal sync (protocol 59, TOKELACOOP_DISMISS_SYNC): our dismissals go
+    // out as EVT_DISMISS and the friend's are repeated here (engine::dismissBody).
+    void setDismissSync(bool v) { dismissSync_ = v; }
 
     // BEFORE engine (protocol 24, both clients): sample the player-faction
     // relation table (~1 Hz, immediately when the affectRelations detour saw a
@@ -2283,6 +2286,16 @@ private:
     // re-key RETIRED: their stale stream tail must never author a spawn REQ
     // or accept a mint (the duplicate-proxy race, run 192211).
     bool          squadSync_;
+    // Dismissal sync (protocol 59). ownDismissed_: the friend's side - a body we
+    // dismissed, by its old hand, until the host's EVT_DISMISS_BIND says which
+    // NPC hand the host streams it under. dismissBinds_: the host's side - those
+    // replies (old hand, our new hand), sent with the next squad publish.
+    bool          dismissSync_;
+    std::map<Key, Character*> ownDismissed_;
+    std::vector<std::pair<Key, Key> > dismissBinds_;
+    void publishDismissals(NetLink& net, u32 ownerId);
+    void applyDismiss(GameWorld* gw, const Key& k, const Key& actor);
+    void applyDismissBind(GameWorld* gw, const Key& k, const Key& actor);
     std::map<std::pair<u32, u32>, unsigned int> tabRank_;
     std::map<Key, unsigned long> rekeyedOld_;
     // Per-TAB ownership verdict, keyed on the container hand and decided ONCE

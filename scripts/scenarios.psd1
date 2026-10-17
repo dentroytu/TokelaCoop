@@ -2159,6 +2159,31 @@
             Advisory = @()
             Tier = 'probe'; WanVariant = $false
         }
+        # dismiss_sync: a character the JOIN dismisses leaves the host's squad too
+        # and stays gone after a save + reload (v0.56, protocol 59). The join hires
+        # two bar NPCs, dismisses one from the squad screen and kills the other;
+        # the host saves 'coopresume' and loads it. Gate: the dismissed one is in
+        # neither squad after the reload (and was in the host's before), with one
+        # DISMISS, the host's repeat and its BIND. dismiss_sync_off turns the
+        # dismissal sync off and must see it come back on the host (the negative
+        # control - the bug up to v0.55).
+        dismiss_sync = @{
+            Save = 'sync'; Setup = ''; Tolerance = 6.0
+            Seconds = 200; KillGraceSec = 170
+            PrimaryGate = 'dismiss_sync'
+            Gating   = @('dismiss_sync', 'clock_sync')
+            Advisory = @('smoothness', 'anim_truth', 'march')
+            Tier = 'full'; WanVariant = $false
+        }
+        dismiss_sync_off = @{
+            DiagEnv = @{ TOKELACOOP_DISMISS_SYNC = '0' }
+            Save = 'sync'; Setup = ''; Tolerance = 6.0
+            Seconds = 200; KillGraceSec = 170
+            PrimaryGate = 'dismiss_sync_off'
+            Gating   = @('dismiss_sync_off')
+            Advisory = @()
+            Tier = 'probe'; WanVariant = $false
+        }
         # Protocol-37 VALIDATION of the transfer-intent channel (xferSync ON): the
         # same three cross-owner drags trade_probe baselined, now expected CLEAN -
         # TAKE lands + the removal propagates (no dupe), GIVE arrives on the owner

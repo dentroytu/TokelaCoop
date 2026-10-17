@@ -2027,6 +2027,8 @@ void Replicator::publishSquadMoves(GameWorld* gw, NetLink& net, u32 ownerId) {
     // throttled EVT arrived). Polling every tick puts the reliable edge in
     // the SAME flush as the new hand's first entity batch, so the peer's
     // re-key always lands before its spawn REQ could even be authored.
+    // Dismissals travel as their own event (the sweep ignores those bodies).
+    publishDismissals(net, ownerId);
     engine::pollSquadRoster(gw);
     engine::SquadMoveEdge edges[8];
     unsigned int n = engine::drainSquadMoveEdges(edges, 8);

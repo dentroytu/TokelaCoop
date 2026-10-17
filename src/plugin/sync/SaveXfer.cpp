@@ -442,6 +442,13 @@ void armWatch(const std::string& name) {
     b[sizeof(b) - 1] = '\0'; coop::logLine(b);
 }
 
+void armWatchRetry(const std::string& name) {
+    armWatch(name);
+    // The save already landed: no change to wait for, only the settle window.
+    g_watchChangeSeen = true;
+    g_watchLastChange = g_watchArmTick;
+}
+
 bool watching() { return g_watchArmed; }
 
 int tickWatch(unsigned int* outFiles, unsigned __int64* outBytes,

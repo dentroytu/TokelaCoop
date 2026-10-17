@@ -2156,6 +2156,45 @@ void pollSquadRoster(GameWorld* gw);
 // Drop every pointer baseline (world swap: all Character* dangle).
 void clearSquadRoster();
 unsigned int drainSquadMoveEdges(SquadMoveEdge* out, unsigned int maxOut);
+// A body this game dismissed: the sweep reports nothing more about it (the
+// dismissal travels as its own event), and captureSquad leaves it out while it
+// lingers in playerCharacters with its NPC hand (a tick or so) - published, it
+// would reach the friend as a new member of an unknown squad. Forgotten once it
+// leaves the roster.
+void ignoreRosterChar(Character* c);
+bool rosterIgnored(Character* c);
+
+// ---- Dismissal (v0.56, protocol 59; game/EngineDismiss.cpp) ------------------
+// A character the local player dismissed in the squad screen: its hand before
+// and after (the "Wandering Squad" NPC it became). The roster sweep ignores the
+// body from then on (ignoreRosterChar): no exit or move is reported for it.
+struct DismissEdge { unsigned int before[5]; unsigned int after[5]; Character* c; };
+// Owner class of a body by hand: 0 unknown, 1 ours, 2 the friend's.
+typedef int (*DismissOwnerFn)(const unsigned int hand[5]);
+// Detour SquadManagementScreen::dismissCharacter: refuse dismissing one of the
+// friend's characters and, with 'track', report local dismissals (without it
+// the sweep reports them as before: an exit). False if it cannot install.
+bool installDismissHook(DismissOwnerFn owner, bool track);
+unsigned int drainDismissEdges(DismissEdge* out, unsigned int maxOut);
+// Dismissals of a friend's character refused since the last call.
+unsigned int takeDismissRefusals();
+// Repeat Kenshi's own dismissal on 'c' (a player-squad member): out of the player
+// faction into a new "Wandering Squad". post = its hand afterwards; steps = how
+// far it got (diagnostics). SEH-guarded; main thread only.
+bool dismissBody(GameWorld* gw, Character* c, unsigned int post[5], int* steps);
+#ifdef TOKELACOOP_HARNESS
+// dismiss_sync: dismiss the squad member at 'hand' the way the player does (the
+// squad screen's confirmation, through the hook - the squad tab is opened for it
+// if it never was); via = 1. If the screen cannot be reached and allowFallback,
+// dismissBody plus a hand-queued edge; via = 2. post = its hand afterwards.
+// 1 done, 3 refused by the hook (the friend's character), 0 failed, -1 no body.
+int probeDismiss(GameWorld* gw, const unsigned int hand[5], unsigned int post[5], int* via,
+                 bool allowFallback);
+// A squad member the hook counts as the friend's (its owner callback); false if none.
+bool probeFriendMember(GameWorld* gw, unsigned int outHand[5], char* outName, unsigned int nameCap);
+// The squad's names joined by '|' (as many as fit); returns the squad size.
+unsigned int probeSquadNames(GameWorld* gw, char* out, unsigned int cap);
+#endif
 
 // SEH-guarded probe lever (squad_probe): programmatically MOVE the member at
 // mHand between squad tabs, so the scenario can exercise the re-container

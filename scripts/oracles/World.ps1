@@ -914,6 +914,101 @@ function Test-SquadPersist {
                 -Detail ($why -join '; '))
 }
 
+function Test-DismissSync {
+    # dismiss_sync (v0.56, protocol 59): a character the JOIN dismisses leaves the
+    # HOST's squad too and stays gone after a save + reload. The join hires A and
+    # B, dismisses A from the squad screen and kills B; the host saves and loads.
+    # Gates: A was in the host's squad before (or the check proves nothing); the
+    # join sent one DISMISS and no exit for A; the host repeated it (ok=1) and
+    # answered with its NPC hand (BIND, so the join drives its body from the host
+    # and gets no duplicate); B's death never became a dismissal; after the reload
+    # A is in neither squad.
+    # -ExpectLeak (dismiss_sync_off, TOKELACOOP_DISMISS_SYNC=0): A must come back
+    # in the host's squad after the reload - the bug, so the gate can fail.
+    param([string]$HostFile, [string]$JoinFile, [switch]$ExpectLeak, [string]$GateName = "dismiss_sync")
+    $why = @()
+    $legs = {
+        param($f, $role)
+        $l = Select-String -Path $f -Pattern "SCENARIO DSM verdict role=$role legs=(\d)" | Select-Object -Last 1
+        return ($l -and $l.Matches[0].Groups[1].Value -eq '1')
+    }
+    if (-not (& $legs $HostFile 'host')) { $why += "host legs (save, ack, load, reload) incomplete" }
+    if (-not (& $legs $JoinFile 'join')) { $why += "join legs (recruit, dismiss, reload) incomplete" }
+
+    $ra = Select-String -Path $JoinFile -Pattern "SCENARIO DSM recruit which=A res=1 name='(.+?)' hand=" | Select-Object -First 1
+    if (-not $ra) {
+        $why += "join never recruited A"
+        Write-Host ("  DISMISS-SYNC FAIL - " + ($why -join '; '))
+        return (Add-GateResult -Name $GateName -Status FAIL -Detail ($why -join '; '))
+    }
+    $nameA = $ra.Matches[0].Groups[1].Value
+    $census = {
+        param($f, $phase)
+        $l = Select-String -Path $f -Pattern "SCENARIO DSM census phase=$phase total=(\d+) names='(.*)' t=\d+" | Select-Object -Last 1
+        if (-not $l) { return $null }
+        return ,@($l.Matches[0].Groups[2].Value -split '\|')
+    }
+    $hPre  = & $census $HostFile 'pre'
+    $hPost = & $census $HostFile 'post'
+    $jPost = & $census $JoinFile 'post'
+    if (-not $hPre) { $why += "host: no squad census before the dismissal" }
+    elseif ($hPre -notcontains $nameA) { $why += "host never had '$nameA' in its squad before the dismissal" }
+    if (-not $hPost) { $why += "host: no squad census after the reload" }
+    if (-not $jPost) { $why += "join: no squad census after the reload" }
+    $hHas = [bool]($hPost -and ($hPost -contains $nameA))
+    $jHas = [bool]($jPost -and ($jPost -contains $nameA))
+
+    $dl = Select-String -Path $JoinFile -Pattern "SCENARIO DSM dismiss rc=(-?\d+) via=(\w+)" | Select-Object -Last 1
+    $via = if ($dl) { $dl.Matches[0].Groups[2].Value } else { '?' }
+    if (-not $dl -or $dl.Matches[0].Groups[1].Value -ne '1') { $why += "join: the dismissal itself failed (via=$via)" }
+    elseif ($via -ne 'screen') { $why += "join: the squad screen was not reached (via=$via): the player's path went untested" }
+    # The guard: the join tried to dismiss one of the host's characters; the hook
+    # must refuse it, and that character must still be in both squads at the end.
+    $rf = Select-String -Path $JoinFile -Pattern "SCENARIO DSM refuse rc=(-?\d+) via=(\w+) name='(.*?)' hand=" | Select-Object -Last 1
+    $friend = ''
+    if (-not $rf) { $why += "join: no attempt at dismissing a host character" }
+    else {
+        $friend = $rf.Matches[0].Groups[3].Value
+        if ($rf.Matches[0].Groups[1].Value -ne '3') { $why += "join: dismissing the host's '$friend' was not refused (rc=$($rf.Matches[0].Groups[1].Value))" }
+        if ($hPost -and $friend -and $hPost -notcontains $friend) { $why += "host lost its '$friend' after the join tried to dismiss it" }
+        if ($jPost -and $friend -and $jPost -notcontains $friend) { $why += "join lost the host's '$friend' after trying to dismiss it" }
+    }
+    $sends = @(Select-String -Path $JoinFile -Pattern "\[squad\] DISMISS send old=(\d+,\d+,\d+,\d+,\d+) ")
+    $kb = Select-String -Path $JoinFile -Pattern "SCENARIO DSM kill which=B ok=1 hand=(\d+,\d+,\d+,\d+,\d+)" | Select-Object -Last 1
+    $handB = if ($kb) { $kb.Matches[0].Groups[1].Value } else { '' }
+
+    if ($ExpectLeak) {
+        if ($sends.Count -gt 0) { $why += "dismissal sync is off, yet the join sent DISMISS" }
+        if ($hPost -and -not $hHas) { $why += "without dismissal sync '$nameA' did not come back in the host's squad" }
+    } else {
+        if ($sends.Count -ne 1) { $why += "join sent $($sends.Count) DISMISS (want 1)" }
+        $oldA = if ($sends.Count -ge 1) { $sends[0].Matches[0].Groups[1].Value } else { '' }
+        if ($oldA) {
+            $exitA = @(Select-String -Path $JoinFile -Pattern ("\[squad\] EVT send old=" + [regex]::Escape($oldA) + " new=\S+ exit=")).Count
+            if ($exitA -gt 0) { $why += "join also sent $exitA squad move/exit for A" }
+            $recv = Select-String -Path $HostFile -Pattern ("\[squad\] RECV DISMISS old=" + [regex]::Escape($oldA) + " ok=(\d) steps=(\d)") | Select-Object -Last 1
+            if (-not $recv) { $why += "host never received the DISMISS for $oldA" }
+            elseif ($recv.Matches[0].Groups[1].Value -ne '1') { $why += "host could not repeat the dismissal (steps=$($recv.Matches[0].Groups[2].Value))" }
+            $p = $oldA -split ','
+            $bind = Select-String -Path $JoinFile -Pattern ("\[squad\] RECV DISMISS-BIND old=" + $p[3] + "," + $p[4] + " npc=\S+ bound=1") | Select-Object -Last 1
+            if (-not $bind) { $why += "join never bound A's body to the host's NPC (no BIND)" }
+        }
+        if ($handB -and @(Select-String -Path $JoinFile -Pattern ("\[squad\] DISMISS send old=" + [regex]::Escape($handB) + " ")).Count -gt 0) {
+            $why += "B's death was sent as a dismissal"
+        }
+        if ($hHas) { $why += "'$nameA' is back in the host's squad after the reload" }
+        if ($jHas) { $why += "'$nameA' is back in the join's squad after the reload" }
+    }
+    $ok = ($why.Count -eq 0)
+    Write-Host ("  DISMISS-SYNC " + $(if ($ok) { "PASS" } else { "FAIL" }) +
+                " - A='$nameA' via=$via sends=$($sends.Count); after reload host has A=$hHas, join has A=$jHas; refused '$friend'" +
+                $(if ($ExpectLeak) { " (negative control: the host should keep A)" } else { "" }) +
+                $(if (-not $ok) { " - " + ($why -join '; ') } else { "" }))
+    return (Add-GateResult -Name $GateName -Status $(if ($ok) { "PASS" } else { "FAIL" }) `
+                -Metrics @{ via = $via; sends = $sends.Count; hostHasA = $hHas; joinHasA = $jHas } `
+                -Detail ($why -join '; '))
+}
+
 function Test-SquadSync {
     param([string]$HostFile, [string]$JoinFile)
     $why = @()

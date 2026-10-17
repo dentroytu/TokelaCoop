@@ -130,6 +130,7 @@
     <ClCompile Include="game\EngineUi.cpp" />
     <ClCompile Include="game\EngineInventory.cpp" />
     <ClCompile Include="game\EngineOwnGuard.cpp" />
+    <ClCompile Include="game\EngineDismiss.cpp" />
     <ClCompile Include="game\EngineSpawnCombat.cpp" />
     <ClCompile Include="game\EngineCharState.cpp" />
     <ClCompile Include="game\EngineWorld.cpp" />
@@ -146,6 +147,7 @@
     <ClCompile Include="sync\ReplicatorDrive.cpp" />
     <ClCompile Include="sync\ReplicatorAuthority.cpp" />
     <ClCompile Include="sync\ReplicatorSpawn.cpp" />
+    <ClCompile Include="sync\ReplicatorDismiss.cpp" />
     <ClCompile Include="sync\ReplicatorItems.cpp" />
     <ClCompile Include="sync\ReplicatorChannels.cpp" />
     <ClCompile Include="sync\SaveXfer.cpp" />

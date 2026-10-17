@@ -1,9 +1,9 @@
 # TokelaCoop
 
-**Current version: v0.55.** Up to v0.53 this project was called **KenshiCoop**.
+**Current version: v0.56.** Up to v0.53 this project was called **KenshiCoop**.
 TokelaCoop is a modified fork of [nhoral/KenshiCoop](https://github.com/nhoral/KenshiCoop).
 In game, the top-left banner and the F2 panel title show the name and the
-version ("TokelaCoop v0.55"): check that you and your friend see the same one.
+version ("TokelaCoop v0.56"): check that you and your friend see the same one.
 
 Setup + Demo (upstream KenshiCoop): [https://www.youtube.com/watch?v=OqwVRRZEYGM](https://www.youtube.com/watch?v=OqwVRRZEYGM)
 
@@ -146,6 +146,10 @@ is needed after an edit.
   theirs when they join. A squad you split off while they are already connected
   stays yours until you save and load again. Squads either of you creates or
   recruits into later stay with whoever made them, across saves and reloads.
+  **Dismissing** a character (squad screen) works for each of you on your own
+  characters: it leaves both games and stays gone after saving and loading
+  (v0.56; before, the friend's dismissed characters came back on reload). You
+  cannot dismiss your friend's characters.
 - **Two-player starts included.** The TokelaCoop mod ships two game starts (New
   Game -> pick one from the list), both the vanilla Wanderer start with two
   wanderers already split into separate squads, so the host gets squad 1 and the

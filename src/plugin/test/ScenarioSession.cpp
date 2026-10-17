@@ -929,7 +929,7 @@ public:
         : TimedScenario(name, 0), recruited_(false), recruitOk_(false), split_(false),
           splitOk_(false), saveIssued_(false), saveOk_(false), ackSeen_(false), ackOk_(false),
           loadIssued_(false), loadOk_(false), sigWas2_(false), swapDone_(false),
-          reportedAtMs_(0), dropStartMs_(0), sigClearedMs_(0), lastStatusMs_(0), ackBase_(0) {
+          reportedAtMs_(0), dropStartMs_(0), sigClearedMs_(0), lastStatusMs_(0), ackBase_(0), ackFails_(0) {
         memset(recruit_, 0, sizeof(recruit_));
     }
 
@@ -981,9 +981,16 @@ public:
             }
             if (saveIssued_ && !ackSeen_ && savexfer::lastAckXferId() != 0 &&
                 savexfer::lastAckXferId() != ackBase_) {
-                ackSeen_ = true;
-                ackOk_ = (savexfer::lastAckOk() == 1);
-                logStep("ack", ackOk_, ctx.elapsedMs);
+                // A failed check gets one re-send (Plugin.cpp XFER-RETRY): wait for its ACK.
+                if (savexfer::lastAckOk() != 1 && ackFails_ == 0) {
+                    ++ackFails_;
+                    ackBase_ = savexfer::lastAckXferId();
+                    logStep("ack-failed-retrying", false, ctx.elapsedMs);
+                } else {
+                    ackSeen_ = true;
+                    ackOk_ = (savexfer::lastAckOk() == 1);
+                    logStep("ack", ackOk_, ctx.elapsedMs);
+                }
             }
             if (ackSeen_ && ackOk_ && !loadIssued_ && live) {
                 loadIssued_ = true;
@@ -1058,11 +1065,217 @@ private:
     unsigned int  recruit_[5];
     bool          sigWas2_, swapDone_;
     unsigned long reportedAtMs_, dropStartMs_, sigClearedMs_, lastStatusMs_;
-    unsigned int  ackBase_;
+    unsigned int  ackBase_, ackFails_;
 
     static const char* const SAVE_NAME;
 };
 const char* const SquadPersistScenario::SAVE_NAME = "coopresume";
+
+// dismiss_sync (v0.56, protocol 59, full tier): a character the JOIN dismisses
+// leaves the HOST's squad too, and stays gone after a save + reload. The join
+// hires two bar NPCs (A, B), dismisses A from the squad screen (the player's own
+// path, through the hook), tries to dismiss one of the host's characters (the
+// hook must refuse it) and kills B (a death must stay a plain exit, never a
+// dismissal). The host saves 'coopresume' and loads it. Both sides log the
+// squad's names before the dismissal and after the reload; the oracle checks A
+// is gone from both after the reload (and was in the host's squad before).
+// dismiss_sync_off (TOKELACOOP_DISMISS_SYNC=0) must see A come back on the host
+// - the bug this fixes, as the negative control.
+class DismissSyncScenario : public TimedScenario {
+public:
+    explicit DismissSyncScenario(const char* name)
+        : TimedScenario(name, 0), recruitedA_(false), recruitedB_(false), okA_(false), okB_(false),
+          preDone_(false), dismissed_(false), dismissOk_(false), killed_(false), refuseTried_(false),
+          saveIssued_(false), saveOk_(false), ackSeen_(false), ackOk_(false),
+          loadIssued_(false), loadOk_(false), sigWas2_(false), swapDone_(false),
+          reportedAtMs_(0), dropStartMs_(0), sigClearedMs_(0), lastStatusMs_(0), ackBase_(0), ackFails_(0) {
+        memset(handA_, 0, sizeof(handA_));
+        memset(handB_, 0, sizeof(handB_));
+    }
+
+    virtual void onStart(const ScenarioContext& ctx) {
+        char b[80];
+        _snprintf(b, sizeof(b) - 1, "SCENARIO DSM start host=%d", ctx.isHost ? 1 : 0);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+
+    virtual bool onTick(const ScenarioContext& ctx) {
+        const bool live = engine::gameplayLive(ctx.gw);
+        if (!ctx.isHost && live) {
+            if (!recruitedA_ && ctx.elapsedMs >= RECRUIT_A_AT_MS) {
+                recruitedA_ = true;
+                okA_ = recruit(ctx, "A", handA_);
+            }
+            if (!recruitedB_ && ctx.elapsedMs >= RECRUIT_B_AT_MS) {
+                recruitedB_ = true;
+                okB_ = recruit(ctx, "B", handB_);
+            }
+        }
+        // Both: the squad as it stands before the dismissal (A must be in the
+        // host's copy of the friend's squad, or the post-reload check proves nothing).
+        if (!preDone_ && live && ctx.elapsedMs >= CENSUS_PRE_AT_MS) {
+            preDone_ = true;
+            census(ctx, "pre");
+        }
+        if (!ctx.isHost && okA_ && !dismissed_ && live && ctx.elapsedMs >= DISMISS_AT_MS) {
+            dismissed_ = true;
+            unsigned int post[5] = { 0, 0, 0, 0, 0 };
+            int via = 0;
+            const int rc = engine::probeDismiss(ctx.gw, handA_, post, &via, /*allowFallback*/ true);
+            dismissOk_ = (rc == 1);
+            char b[224];
+            _snprintf(b, sizeof(b) - 1,
+                      "SCENARIO DSM dismiss rc=%d via=%s old=%u,%u,%u,%u,%u new=%u,%u,%u,%u,%u t=%lu",
+                      rc, via == 1 ? "screen" : (via == 2 ? "fallback" : "none"),
+                      handA_[0], handA_[1], handA_[2], handA_[3], handA_[4],
+                      post[0], post[1], post[2], post[3], post[4], ctx.elapsedMs);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+        }
+        // The own-characters guard: dismissing one of the HOST's characters from
+        // here must be refused by the hook (no fallback - that would bypass it).
+        if (!ctx.isHost && !refuseTried_ && live && ctx.elapsedMs >= REFUSE_AT_MS) {
+            refuseTried_ = true;
+            unsigned int fh[5] = { 0, 0, 0, 0, 0 }, post[5] = { 0, 0, 0, 0, 0 };
+            char nm[48] = "";
+            int rc = -9, via = 0;
+            if (engine::probeFriendMember(ctx.gw, fh, nm, sizeof(nm)))
+                rc = engine::probeDismiss(ctx.gw, fh, post, &via, /*allowFallback*/ false);
+            char b[200];
+            _snprintf(b, sizeof(b) - 1, "SCENARIO DSM refuse rc=%d via=%s name='%s' hand=%u,%u,%u,%u,%u t=%lu",
+                      rc, via == 1 ? "screen" : "none", nm, fh[0], fh[1], fh[2], fh[3], fh[4], ctx.elapsedMs);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+        }
+        if (!ctx.isHost && okB_ && !killed_ && live && ctx.elapsedMs >= KILL_AT_MS) {
+            killed_ = true;
+            const bool ok = engine::killSubject(ctx.gw, handB_);
+            char b[160];
+            _snprintf(b, sizeof(b) - 1, "SCENARIO DSM kill which=B ok=%d hand=%u,%u,%u,%u,%u t=%lu",
+                      ok ? 1 : 0, handB_[0], handB_[1], handB_[2], handB_[3], handB_[4], ctx.elapsedMs);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+        }
+        // HOST: save (streamed to the join), then load it.
+        if (ctx.isHost) {
+            if (!saveIssued_ && live && ctx.elapsedMs >= SAVE_AT_MS) {
+                saveIssued_ = true;
+                ackBase_ = savexfer::lastAckXferId();
+                saveOk_ = engine::saveGameAs(SAVE_NAME);
+                logStep("save", saveOk_, ctx.elapsedMs);
+            }
+            if (saveIssued_ && !ackSeen_ && savexfer::lastAckXferId() != 0 &&
+                savexfer::lastAckXferId() != ackBase_) {
+                // A failed check gets one re-send (Plugin.cpp XFER-RETRY): wait for its ACK.
+                if (savexfer::lastAckOk() != 1 && ackFails_ == 0) {
+                    ++ackFails_;
+                    ackBase_ = savexfer::lastAckXferId();
+                    logStep("ack-failed-retrying", false, ctx.elapsedMs);
+                } else {
+                    ackSeen_ = true;
+                    ackOk_ = (savexfer::lastAckOk() == 1);
+                    logStep("ack", ackOk_, ctx.elapsedMs);
+                }
+            }
+            if (ackSeen_ && ackOk_ && !loadIssued_ && live) {
+                loadIssued_ = true;
+                loadOk_ = engine::loadSave(SAVE_NAME);
+                logStep("load", loadOk_, ctx.elapsedMs);
+            }
+        }
+        // Both: the world swap - as squad_persist.
+        if (!live && dropStartMs_ == 0) dropStartMs_ = ctx.elapsedMs;
+        else if (live && dropStartMs_ != 0) {
+            const unsigned long ms = ctx.elapsedMs - dropStartMs_;
+            dropStartMs_ = 0;
+            if (ms >= SWAP_MIN_MS && !swapDone_) markSwap(ctx.elapsedMs);
+        }
+        {
+            const int sig = engine::saveMgrSignal(0);
+            if (sig == 2) { sigWas2_ = true; sigClearedMs_ = 0; }
+            else if (sigWas2_ && sigClearedMs_ == 0) sigClearedMs_ = ctx.elapsedMs;
+            if (!swapDone_ && sigWas2_ && sigClearedMs_ != 0 && live && dropStartMs_ == 0 &&
+                ctx.elapsedMs >= sigClearedMs_ + SYNC_CONFIRM_MS)
+                markSwap(ctx.elapsedMs);
+        }
+        if (ctx.elapsedMs - lastStatusMs_ >= 5000) {
+            lastStatusMs_ = ctx.elapsedMs;
+            char b[176];
+            _snprintf(b, sizeof(b) - 1,
+                      "SCENARIO DSM state dismiss=%d save=%d ack=%d load=%d swapDone=%d live=%d t=%lu",
+                      dismissOk_ ? 1 : 0, saveOk_ ? 1 : 0, ackOk_ ? 1 : 0, loadOk_ ? 1 : 0,
+                      swapDone_ ? 1 : 0, live ? 1 : 0, ctx.elapsedMs);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+        }
+        if ((swapDone_ && live && ctx.elapsedMs >= reportedAtMs_) || ctx.elapsedMs >= DURATION_MS) {
+            if (swapDone_ && live) census(ctx, "post");
+            const bool legs = ctx.isHost ? (saveOk_ && ackOk_ && loadOk_ && swapDone_)
+                                         : (okA_ && dismissOk_ && swapDone_);
+            char b[160];
+            _snprintf(b, sizeof(b) - 1, "SCENARIO DSM verdict role=%s legs=%d t=%lu",
+                      ctx.isHost ? "host" : "join", legs ? 1 : 0, ctx.elapsedMs);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            passed_ = legs;   // who is in which squad is the oracle's call (both logs)
+            return true;
+        }
+        return false;
+    }
+
+private:
+    static const unsigned long RECRUIT_A_AT_MS  = 8000;
+    static const unsigned long RECRUIT_B_AT_MS  = 11000;
+    static const unsigned long CENSUS_PRE_AT_MS = 17000;   // the host has mirrored both recruits
+    static const unsigned long DISMISS_AT_MS    = 19000;
+    static const unsigned long REFUSE_AT_MS     = 21000;
+    static const unsigned long KILL_AT_MS       = 23000;
+    static const unsigned long SAVE_AT_MS       = 34000;
+    static const unsigned long SWAP_MIN_MS      = 400;
+    static const unsigned long SYNC_CONFIRM_MS  = 3000;
+    static const unsigned long REPORT_HOLD_MS   = 15000;
+    static const unsigned long DURATION_MS      = 130000;
+
+    static bool recruit(const ScenarioContext& ctx, const char* which, unsigned int out[5]) {
+        unsigned int hb[5] = { 0, 0, 0, 0, 0 };
+        const int res = engine::probeRecruit(ctx.gw, /*runtime*/ false, hb, out);
+        char nm[48] = "";
+        if (res == 1)
+            engine::charName(engine::resolveCharByHand(out[3], out[4], out[0], out[1], out[2]),
+                             nm, sizeof(nm));
+        char b[224];
+        _snprintf(b, sizeof(b) - 1,
+                  "SCENARIO DSM recruit which=%s res=%d name='%s' hand=%u,%u,%u,%u,%u t=%lu",
+                  which, res, nm, out[0], out[1], out[2], out[3], out[4], ctx.elapsedMs);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+        return res == 1 && nm[0] != '\0';
+    }
+    static void census(const ScenarioContext& ctx, const char* phase) {
+        char names[400];
+        const unsigned int n = engine::probeSquadNames(ctx.gw, names, sizeof(names));
+        char b[512];
+        _snprintf(b, sizeof(b) - 1, "SCENARIO DSM census phase=%s total=%u names='%s' t=%lu",
+                  phase, n, names, ctx.elapsedMs);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+    void markSwap(unsigned long t) {
+        swapDone_ = true;
+        reportedAtMs_ = t + REPORT_HOLD_MS;
+        char b[96];
+        _snprintf(b, sizeof(b) - 1, "SCENARIO DSM reloaded t=%lu", t);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+    static void logStep(const char* what, bool ok, unsigned long t) {
+        char b[112];
+        _snprintf(b, sizeof(b) - 1, "SCENARIO DSM %s name='%s' ok=%d t=%lu", what, SAVE_NAME, ok ? 1 : 0, t);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+
+    bool          recruitedA_, recruitedB_, okA_, okB_, preDone_, dismissed_, dismissOk_, killed_, refuseTried_;
+    bool          saveIssued_, saveOk_, ackSeen_, ackOk_, loadIssued_, loadOk_;
+    bool          sigWas2_, swapDone_;
+    unsigned long reportedAtMs_, dropStartMs_, sigClearedMs_, lastStatusMs_;
+    unsigned int  ackBase_, ackFails_;
+    unsigned int  handA_[5], handB_[5];
+
+    static const char* const SAVE_NAME;
+};
+const char* const DismissSyncScenario::SAVE_NAME = "coopresume";
 
 // save_sync (protocol 31 phase 12c, full tier; saveSync ON) / save_stage1
 // (the resume_test.ps1 stage-1 variant: a building is placed FIRST so the
@@ -1500,6 +1713,8 @@ Scenario* makeSessionScenario(const std::string& name) {
     if (name == "load_sync")      return new LoadSyncScenario();
     if (name == "squad_persist")     return new SquadPersistScenario("squad_persist");
     if (name == "squad_persist_off") return new SquadPersistScenario("squad_persist_off");
+    if (name == "dismiss_sync")      return new DismissSyncScenario("dismiss_sync");
+    if (name == "dismiss_sync_off")  return new DismissSyncScenario("dismiss_sync_off");
     if (name == "money_persist")  return new MoneyPersistScenario();
     return 0;
 }

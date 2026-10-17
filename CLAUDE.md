@@ -11,10 +11,18 @@ la descripción del `.mod`. No hay que cambiar nunca los StringIds `N-KenshiCoop
 `.mod`: las partidas guardadas los usan. Si un Kenshi tiene cargada a la vez la DLL antigua `KenshiCoop.dll`,
 TokelaCoop no se activa y avisa.
 
-> **Estado (2026-10-10):**
+> **Estado (2026-10-17):**
 > - Compilación verificada en CI (`windows-2022`): `prototest`, `tunneltest`, DLL Harness y Release, y kit con instalador.
->   Releases publicadas: `v0.52` y `v0.53` (con el nombre KenshiCoop) y `v0.54` (TokelaCoop, 2026-10-10, protocolo 57).
+>   Releases publicadas: `v0.52` y `v0.53` (con el nombre KenshiCoop), `v0.54` (TokelaCoop, 2026-10-10, protocolo 57),
+>   `v0.55` (2026-10-17, protocolo 58) y `v0.56` (2026-10-17, protocolo 59: despedir personajes).
 > - **Verificado en el juego** (PC del autor del fork, Kenshi de Steam con RE_Kenshi):
+>   - v0.56 (2026-10-17): despedir por la pantalla de escuadras real (la prueba abre la pestaña 4) se refleja en el
+>     otro juego y no vuelve al guardar y cargar (`dismiss_sync`; `dismiss_sync_off` reproduce el fallo antiguo), y
+>     despedir a un personaje del amigo se rechaza. Regresión de 26 pruebas (básicas + escuadras, guardar/cargar,
+>     reclutar, reconexión): todo pasa; `npc_sync` solo al reintentar, como antes;
+>   - v0.55 (2026-10-17): el amigo que pasa a "Unirse" desde F2 hace daño a los NPCs (`pc_assault_ui`, 11 golpes de 11)
+>     y las tiendas siguen sincronizadas (`store_sync_ui`); copias de seguridad y el HELLO con la versión, en los logs.
+>     `npc_sync` falla también con la v0.54 (comprobado A/B): es inestabilidad anterior;
 >   - v0.54 (2026-09-25): carga como `TokelaCoop.dll` desde `mods\TokelaCoop`, migración con `deploy.cmd` de las dos
 >     instalaciones, banner/F2 con "TokelaCoop v0.54" (gris con sombra cuando el co-op está apagado), inicios
 >     renombrados, partidas de `fixtures/saves` (listan "KenshiCoop") sin avisos y el aviso de doble carga;
@@ -61,7 +69,7 @@ TokelaCoop no se activa y avisa.
 
 Flujo de trabajo:
 - una rama por cambio, PR y fusión cuando el CI está en verde;
-- las releases se publican con una etiqueta `vX.YY` (última: `v0.54`), que tiene que coincidir con
+- las releases se publican con una etiqueta `vX.YY` (última: `v0.56`), que tiene que coincidir con
   `TOKELACOOP_VERSION` de `src/netproto/Version.h` (el CI rechaza la etiqueta si no);
 - el dueño prefiere español y una UX muy sencilla.
 
@@ -218,7 +226,7 @@ powershell -ExecutionPolicy Bypass -File scripts\regress.ps1 -Tier full -SkipBui
   - Protocolo 57 desde la v0.54 (la v0.53 era 56) y 58 desde la v0.55 (cambio de rol desde el panel; rechaza la
     v0.54, con la que el amigo que entraba desde F2 no hacía daño): se rechazan con aviso en vez de jugar con reglas
     distintas. Desde la v0.55 el HELLO lleva `TokelaCoop/<versión>` en el nombre (sale en el log del host), y el host
-    se despide con `REFUSE_HOST_CLOSED` al parar.
+    se despide con `REFUSE_HOST_CLOSED` al parar. Protocolo 59 desde la v0.56 (`EVT_DISMISS` y `EVT_DISMISS_BIND`).
   - **Rol:** todo lo que depende de ser host o amigo está en `applyRoleSettings()` (`Plugin.cpp`), que se llama al
     arrancar y en `coopUiConnect`. Un amigo real arranca como host por defecto y elige "Unirse" en F2; el harness
     lo reproduce con `TOKELACOOP_ROLE_VIA_UI=1` (`pc_assault_ui`, `store_sync_ui`, puerta `role_via_ui`).
@@ -247,7 +255,15 @@ powershell -ExecutionPolicy Bypass -File scripts\regress.ps1 -Tier full -SkipBui
     dos lo leen al cargar (`via=ledger` en `TABOWN`): así una escuadra nueva del join no pasa al host al recargar
     (`TOKELACOOP_TAB_LEDGER=0` lo apaga). Solo decide si nombra como del join alguna pestaña que exista; si no, manda
     la regla de rango, para que la segunda escuadra que el host separa en una partida de una sola escuadra siga siendo
-    del amigo (lo que dice el README).
+    del amigo (lo que dice el README);
+  - **despedir** (v0.56, `game/EngineDismiss.cpp` + `sync/ReplicatorDismiss.cpp`): un hook en
+    `SquadManagementScreen::dismissCharacter` rechaza despedir a un personaje del amigo y avisa de los despidos propios,
+    que viajan como `EVT_DISMISS` (no como salida de escuadra: el barrido de la escuadra ignora al despedido,
+    `ignoreRosterChar`, y `captureSquad` lo deja fuera mientras sigue en `playerCharacters`). El otro juego repite lo
+    que hace Kenshi (`dismissBody`: facción "Adventurers Guild", escuadra nueva "Wandering Squad"). Como el despedido
+    pasa a ser un NPC del host, el host contesta al amigo con `EVT_DISMISS_BIND` (su mano de NPC) para que el amigo
+    mueva su cuerpo según el host y no aparezca un duplicado. `TOKELACOOP_DISMISS_SYNC=0` vuelve al comportamiento
+    antiguo (el despedido volvía al recargar); pruebas `dismiss_sync` y `dismiss_sync_off`.
 - **Escenarios** (`src/plugin/test/`): solo en las configuraciones Harness y Debug (`TOKELACOOP_HARNESS`).
 
 ## Reglas al tocar código

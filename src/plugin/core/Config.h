@@ -582,6 +582,11 @@ struct Config {
     // the A/B escape hatch.
     bool          squadSync;
 
+    // TOKELACOOP_DISMISS_SYNC (default ON, protocol 59): a character dismissed in
+    // one game is dismissed in the other too (EVT_DISMISS). "0" is the A/B
+    // escape hatch (dismiss_sync_off: the old behaviour, the body comes back).
+    bool          dismissSync;
+
     // TOKELACOOP_LATEJOIN_SYNC (default ON): late-join/reconnect resync
     // (protocol 30, no wire change) - on the peer-connect edge the
     // Replicator re-announces every live placed-building PLACE (+ REMOVE

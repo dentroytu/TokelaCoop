@@ -918,6 +918,21 @@ void Replicator::applyEvents(GameWorld* gw, Inbound& in) {
                 rekeyPeerBody(gw, k, nk, "squad");
                 break;
             }
+            case EVT_DISMISS: {
+                // Protocol 59: the sender dismissed subject (ReplicatorDismiss.cpp).
+                if (!squadSync_ || !dismissSync_) break;
+                Key nk; nk.t = ev.aType; nk.c = ev.aContainer;
+                nk.cs = ev.aContainerSerial; nk.i = ev.aIndex; nk.s = ev.aSerial;
+                applyDismiss(gw, k, nk);
+                break;
+            }
+            case EVT_DISMISS_BIND: {
+                if (!dismissSync_) break;
+                Key nk; nk.t = ev.aType; nk.c = ev.aContainer;
+                nk.cs = ev.aContainerSerial; nk.i = ev.aIndex; nk.s = ev.aSerial;
+                applyDismissBind(gw, k, nk);
+                break;
+            }
             default: break;
         }
         char b[200]; _snprintf(b, sizeof(b) - 1,
