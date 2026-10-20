@@ -190,6 +190,18 @@ Compatibilidad comprobada con análisis estático (2026-09-23), no ejecutando el
 - Release: `scripts\set_version.ps1 -Version X.YY` (cambia `Version.h`, la descripción del `.mod` del repo, el
   generador y el README a la vez), commit, y luego `git tag vX.YY && git push origin vX.YY` publica la Release con
   el zip y su `.sha256` (el CI falla si la etiqueta no es `v` + esa versión).
+- **Steam Workshop** (desde 2026-10-20): item `3823660945` (`tools/WorkshopUpload/item_id.txt`), **no listado**
+  (lo ve quien tenga el enlace) hasta probarlo con un amigo de verdad; publicado con la cuenta de Steam del dueño.
+  - `scripts\publish_workshop.ps1 [-Visibility 0|1|2|3] [-Note "..."] [-CheckOnly]` sube la DLL de la release de
+    GitHub de la versión de `Version.h` (descarga el kit y comprueba su SHA-256): tras cada release, ejecutarlo.
+  - Usa la sesión de Steam abierta (sin contraseña) con `dist\workshop_upload.exe`
+    (`tools/WorkshopUpload/workshop_upload.cpp`, `scripts\build_workshop_upload.cmd`, compilador moderno), que llama a la
+    `steam_api64.dll` de Kenshi como app 233860. Esa DLL está hecha para `STEAMUGC_INTERFACE_VERSION008` (la 009 descoloca
+    las llamadas); `check` lo comprueba antes de escribir nada (suscripciones = carpetas descargadas).
+  - El item imita a los mods del Workshop de Kenshi: `TokelaCoop.mod`, la DLL, `RE_Kenshi.json`, `coop_config.json`,
+    `_TokelaCoop.img` (la vista previa) y `_TokelaCoop.info` (XML con id, título, etiqueta y visibilidad).
+  - Título, descripción (BBCode) e imagen en `tools/WorkshopUpload/`. RE_Kenshi no se puede instalar desde el Workshop:
+    el jugador lo instala aparte (o con el kit).
 - Cambiar de versión de RE_Kenshi requiere tocar dos sitios de `TokelaCoopInstaller.psm1`:
   `$REKenshiRelease` (URL + SHA-256) y `$KnownKenshiLib` (hash de su `KenshiLib.dll`).
 
