@@ -1,0 +1,45 @@
+[h1]TokelaCoop: juega tu partida de Kenshi con un amigo[/h1]
+Co-op de 2 jugadores por Steam. Uno de los dos (el anfitrión) carga su partida y el otro entra en ella: los dos estáis en el mismo mundo a la vez y cada uno maneja sus propios personajes.
+La partida es la del anfitrión. Cuando guarda, se guarda para los dos, y la próxima vez seguís donde lo dejasteis.
+
+[b]En pruebas.[/b] Muy probado con dos Kenshi en un mismo PC; las partidas con amigos de verdad están empezando ahora. Si algo falla, cuéntalo en GitHub (enlace abajo).
+
+[h2]Requisitos (los dos jugadores)[/h2]
+[list]
+[*]Kenshi de Steam (probado con la 1.0.65).
+[*][b]RE_Kenshi 0.3.5[/b] o más nuevo: [url=https://github.com/BFrizzleFoShizzle/RE_Kenshi/releases]descárgalo aquí[/url] y ejecuta su instalador. Sin RE_Kenshi el mod no se carga.
+[*]La [b]misma versión[/b] de TokelaCoop y los [b]mismos mods[/b], en el mismo orden.
+[/list]
+
+[h2]Instalar[/h2]
+[olist]
+[*]Instala RE_Kenshi (arriba).
+[*]Suscríbete a este mod.
+[*]En el launcher de Kenshi, pestaña Mods, marca TokelaCoop.
+[*]Al abrir el juego, arriba a la izquierda pone "TokelaCoop vX.YY". Tiene que poner lo mismo en los dos.
+[/olist]
+¿Ya lo instalaste con el kit de GitHub? Usa solo uno de los dos: si están los dos marcados, el segundo se queda apagado y avisa.
+No lo uses a la vez que otro mod de multijugador.
+
+[h2]Jugar[/h2]
+Pulsa [b]F2[/b] (funciona también en el menú principal).
+[list]
+[*][b]Invitar a un amigo de Steam[/b]: el anfitrión elige a su amigo y el amigo acepta la invitación de Steam.
+[*][b]Abrir mi partida a mis amigos de Steam[/b]: el amigo, con Kenshi abierto, hace clic derecho en el anfitrión en su lista de amigos de Steam y pulsa "Unirse a la partida".
+[*][b]Volver a jugar con <amigo>[/b]: las siguientes veces, sin invitación.
+[/list]
+El amigo no necesita cargar nada: le llega la partida del anfitrión. Para empezar de cero, el inicio de partida "TokelaCoop (Wanderer x2)" ya da una escuadra a cada uno.
+
+[h2]Código, licencia y créditos[/h2]
+Código abierto (AGPL-3.0): [url=https://github.com/dentroytu/TokelaCoop]github.com/dentroytu/TokelaCoop[/url]. Ahí están las versiones, el kit con instalador (instala también RE_Kenshi) y los avisos de fallos.
+Basado en KenshiCoop de nhoral ([url=https://github.com/nhoral/KenshiCoop]github.com/nhoral/KenshiCoop[/url]). Usa RE_Kenshi y KenshiLib de BFrizzleFoShizzle.
+Proyecto de fans, sin relación con Lo-Fi Games.
+
+[hr][/hr]
+[h1]English[/h1]
+2-player co-op over Steam. One player (the host) loads their save and the other joins it: you are both in the same world at once, each with your own characters. The game is the host's: when the host saves, it is saved for both, and next time you carry on where you left off. [b]In testing.[/b]
+
+[b]Needs:[/b] Steam Kenshi (tested on 1.0.65), [url=https://github.com/BFrizzleFoShizzle/RE_Kenshi/releases]RE_Kenshi 0.3.5[/url] or newer, and the same TokelaCoop version and the same mods (same order) on both PCs.
+[b]Install:[/b] install RE_Kenshi, subscribe, tick TokelaCoop in the launcher's Mods tab. The top-left corner shows "TokelaCoop vX.YY": it must match on both PCs.
+[b]Play:[/b] press F2 - "Invite a Steam friend", "Open my game to Steam friends" (the friend uses "Join Game" in the Steam friends list) or, next time, "Play again with <friend>".
+Do not combine it with the GitHub kit copy or with another multiplayer mod. Source code (AGPL-3.0), releases and bug reports: [url=https://github.com/dentroytu/TokelaCoop]github.com/dentroytu/TokelaCoop[/url]. Based on nhoral's KenshiCoop.
