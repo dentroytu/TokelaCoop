@@ -49,7 +49,10 @@ const int k_iSteamMatchmakingCallbacks = 500;
 const int k_iSteamNetworkingCallbacks  = 1200;
 const int cb_LobbyCreated           = k_iSteamMatchmakingCallbacks + 13; // 513
 const int cb_LobbyEnter             = k_iSteamMatchmakingCallbacks + 4;  // 504
-const int cb_GameLobbyJoinRequested = k_iSteamMatchmakingCallbacks + 33; // 533
+// GameLobbyJoinRequested_t is an ISteamFriends callback (k_iSteamFriendsCallbacks
+// + 33). It was 500 + 33 up to v0.61: Steam never delivered an accepted invite or
+// a "Join Game" to the friend's game (found in the first real session, 2026-10-22).
+const int cb_GameLobbyJoinRequested = k_iSteamFriendsCallbacks + 33;     // 333
 const int cb_P2PSessionRequest      = k_iSteamNetworkingCallbacks  + 2;  // 1202
 
 // ---- Callback param structs (Steamworks #pragma pack(8) layouts) -------------
