@@ -1,9 +1,9 @@
 # TokelaCoop
 
-**Current version: v0.61.** Up to v0.53 this project was called **KenshiCoop**.
+**Current version: v0.62.** Up to v0.53 this project was called **KenshiCoop**.
 TokelaCoop is a modified fork of [nhoral/KenshiCoop](https://github.com/nhoral/KenshiCoop).
 In game, the top-left banner and the F2 panel title show the name and the
-version ("TokelaCoop v0.61"): check that you and your friend see the same one.
+version ("TokelaCoop v0.62"): check that you and your friend see the same one.
 
 Setup + Demo (upstream KenshiCoop): [https://www.youtube.com/watch?v=OqwVRRZEYGM](https://www.youtube.com/watch?v=OqwVRRZEYGM)
 
