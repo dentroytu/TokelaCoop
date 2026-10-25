@@ -317,6 +317,27 @@ function Find-WorkshopTokelaCoop([string]$KenshiDir) {
     return $hits
 }
 
+# The Kenshi install a Workshop item belongs to: the item lives in
+# <steamapps>\workshop\content\233860\<id>, the game in <steamapps>\common\Kenshi.
+# $null when that folder is not a Kenshi install (or the item is elsewhere).
+function Get-WorkshopKenshiDir([string]$ItemDir) {
+    if (-not $ItemDir) { return $null }
+    $content = Split-Path -Parent $ItemDir          # ...\233860
+    if ((Split-Path -Leaf $content) -ne $script:KenshiAppId) { return $null }
+    $steamapps = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $content))
+    $kenshi = Join-Path $steamapps 'common\Kenshi'
+    if (Test-KenshiDir $kenshi) { return (Resolve-Path -LiteralPath $kenshi).Path }
+    return $null
+}
+
+# A kit copy of the mod (mods\TokelaCoop) next to a Workshop one: RE_Kenshi
+# would load both. Returns that folder, or $null.
+function Find-KitTokelaCoop([string]$KenshiDir) {
+    $dir = Join-Path $KenshiDir 'mods\TokelaCoop'
+    if (Test-Path -LiteralPath (Join-Path $dir 'TokelaCoop.dll')) { return $dir }
+    return $null
+}
+
 function Test-KenshiRunning {
     return [bool](Get-Process -Name 'kenshi_x64', 'kenshi' -ErrorAction SilentlyContinue)
 }

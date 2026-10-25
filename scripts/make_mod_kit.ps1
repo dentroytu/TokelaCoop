@@ -121,11 +121,16 @@ Write-Host "  .mod description: $((Get-ModInfo $kitMod).Description.Substring(0,
   // checkUpdates: once per run TokelaCoop asks GitHub which version is the latest
   // (that request is all it sends) and F2 tells you when a newer one is out. Set
   // it to false to never ask.
+  //
+  // netProfile: "internet" smooths the other player's characters for an internet
+  // connection (delay that jumps around). "lan" is the old, tighter tuning, for two
+  // PCs on the same home network. Both players can pick their own.
   "transport": "steam",
   "ip": "127.0.0.1",
   "port": 27800,
   "autoConnect": false,
-  "checkUpdates": true
+  "checkUpdates": true,
+  "netProfile": "internet"
 }
 '@ | Set-Content (Join-Path $modDir "coop_config.json") -Encoding UTF8
 

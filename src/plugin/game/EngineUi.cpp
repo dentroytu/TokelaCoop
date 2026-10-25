@@ -1332,6 +1332,10 @@ void coopOverlayTick(const char* text, int state, bool show) {
     }
 }
 
+bool coopPanelPickerShown() {
+    return g_panel.open && g_panel.view == VIEW_PICK;
+}
+
 void coopUiShutdown() {
     ForgottenGUI* g = ::gui;
     if (!g) return;

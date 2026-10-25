@@ -1795,9 +1795,25 @@ void Replicator::applyTargets(GameWorld* gw) {
             // metre of target movement is the hysteresis.
             bool sourceMoving = vlen > NPC_MOVE_VEL;
             if (moved > REISSUE_DIST) {
-                float spd = out.cSpeed + gapNewest * catchupK_;
+                // Catch-up speed. The lan profile adds the whole distance to the
+                // newest pose, whichever side of it the body is on; the internet
+                // profile (v0.63) only adds how far the body TRAILS it along the
+                // source's travel - a body ahead (late jitter burst) was sped up
+                // further ahead and then snapped back.
+                float gain = gapNewest;
+                if (walkBehindOnly_ && haveActual && vlen > 0.01f) {
+                    float along = ((newest.x - ax) * vx + (newest.y - ay) * vy +
+                                   (newest.z - az) * vz) / vlen;
+                    gain = (along > 0.0f) ? along : 0.0f;
+                }
+                // The reported speed is per game second; a peer whose game runs
+                // faster (its own clock catch-up) moves its bodies faster in real
+                // time than it reports. Walk at the measured pace then.
+                float srcSpd = out.cSpeed;
+                if (walkSrcVel_ && vlen > srcSpd) srcSpd = vlen;
+                float spd = srcSpd + gain * catchupK_;
                 float base = (out.cSpeed > 1.0f) ? out.cSpeed : 12.0f;
-                float cap = base * 2.5f;
+                float cap = base * walkCapMult_;
                 if (spd > cap) spd = cap;
                 engine::walkTo(c, tx, ty, tz, spd);
                 if (isSquad) ++walkReissueSquad_;

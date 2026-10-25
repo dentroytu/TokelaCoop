@@ -17,6 +17,11 @@
   6. Warn about a Workshop copy of the mod under either name (would load twice).
   Re-running it updates the mod in place.
 
+  -Workshop (v0.63; "Instalar RE_Kenshi.cmd" inside the Steam Workshop item): the
+  Workshop already supplies the mod, so steps 3 and 6 turn around - nothing is
+  copied, Kenshi is the one of the item's own Steam library, and the warning is
+  about a kit copy in mods\TokelaCoop instead.
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File installer\Install-TokelaCoop.ps1
 .EXAMPLE
@@ -26,6 +31,7 @@
 param(
     [string]$KenshiPath = '',
     [switch]$SkipREKenshi,
+    [switch]$Workshop,
     [switch]$NoPause
 )
 
@@ -65,7 +71,8 @@ try {
     Get-ChildItem -LiteralPath $kitDir -Recurse -File -ErrorAction SilentlyContinue |
         Unblock-File -ErrorAction SilentlyContinue
 
-    $kitMod = Join-Path $kitDir 'TokelaCoop'
+    # The Workshop item holds the plugin files at its top level; the kit, in TokelaCoop\.
+    $kitMod = if ($Workshop) { $kitDir } else { Join-Path $kitDir 'TokelaCoop' }
     if (-not (Test-Path -LiteralPath (Join-Path $kitMod 'TokelaCoop.dll'))) {
         throw (T "No encuentro la carpeta TokelaCoop junto al instalador ($kitMod). Descomprime el zip entero y vuelve a probar." `
                  "The TokelaCoop folder is missing next to the installer ($kitMod). Extract the whole zip and try again.")
@@ -74,6 +81,7 @@ try {
     # 1. Kenshi ------------------------------------------------------------------
     Step 'Buscando Kenshi...' 'Looking for Kenshi...'
     $kenshi = $KenshiPath
+    if (-not $kenshi -and $Workshop) { $kenshi = Get-WorkshopKenshiDir $kitDir }
     if (-not $kenshi) {
         $found = @(Find-KenshiInstalls)
         if ($found.Count -ge 1) {
@@ -103,6 +111,7 @@ try {
         $args2 = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$($MyInvocation.MyCommand.Path)`"",
                    '-KenshiPath', "`"$kenshi`"")
         if ($SkipREKenshi) { $args2 += '-SkipREKenshi' }
+        if ($Workshop) { $args2 += '-Workshop' }
         Start-Process -FilePath 'powershell.exe' -ArgumentList $args2 -Verb RunAs
         $NoPause = $true
         return
@@ -148,10 +157,12 @@ try {
         }
     }
 
-    # 3. TokelaCoop files --------------------------------------------------------
-    Step 'Copiando TokelaCoop a la carpeta mods...' 'Copying TokelaCoop into the mods folder...'
-    $dst = Install-TokelaCoopFiles $kitMod $kenshi
-    Ok $dst $dst
+    # 3. TokelaCoop files (the Workshop already put them in its own folder) ------
+    if (-not $Workshop) {
+        Step 'Copiando TokelaCoop a la carpeta mods...' 'Copying TokelaCoop into the mods folder...'
+        $dst = Install-TokelaCoopFiles $kitMod $kenshi
+        Ok $dst $dst
+    }
 
     # 4. Enable the mod (and switch off the old KenshiCoop) ----------------------
     Step 'Activando TokelaCoop en la lista de mods...' 'Enabling TokelaCoop in the mod list...'
@@ -176,16 +187,29 @@ try {
     }
 
     # 6. Leftovers that break things ---------------------------------------------
-    $ws = @(Find-WorkshopTokelaCoop $kenshi)
-    if ($ws.Count -gt 0) {
-        Warn 'También tienes el mod (TokelaCoop o KenshiCoop) desde Steam Workshop; se cargaría dos veces. Date de baja en Workshop:' `
-             'You also have the mod (TokelaCoop or KenshiCoop) from Steam Workshop; it would load twice. Unsubscribe from it in the Workshop:'
-        foreach ($w in $ws) { Info $w $w }
+    if ($Workshop) {
+        $kitCopy = Find-KitTokelaCoop $kenshi
+        if ($kitCopy) {
+            Warn 'También tienes TokelaCoop instalado con el kit de GitHub; se cargaría dos veces. Usa solo uno: borra esta carpeta o date de baja en el Workshop:' `
+                 'You also have TokelaCoop installed from the GitHub kit; it would load twice. Use only one: delete this folder or unsubscribe in the Workshop:'
+            Info $kitCopy $kitCopy
+        }
+    } else {
+        $ws = @(Find-WorkshopTokelaCoop $kenshi)
+        if ($ws.Count -gt 0) {
+            Warn 'También tienes el mod (TokelaCoop o KenshiCoop) desde Steam Workshop; se cargaría dos veces. Date de baja en Workshop:' `
+                 'You also have the mod (TokelaCoop or KenshiCoop) from Steam Workshop; it would load twice. Unsubscribe from it in the Workshop:'
+            foreach ($w in $ws) { Info $w $w }
+        }
     }
 
     Write-Host ''
     Write-Host '==============================================' -ForegroundColor Green
-    Write-Host (T '   Listo. TokelaCoop está instalado.' '   Done. TokelaCoop is installed.') -ForegroundColor Green
+    if ($Workshop) {
+        Write-Host (T '   Listo. RE_Kenshi está instalado y TokelaCoop activado.' '   Done. RE_Kenshi is installed and TokelaCoop enabled.') -ForegroundColor Green
+    } else {
+        Write-Host (T '   Listo. TokelaCoop está instalado.' '   Done. TokelaCoop is installed.') -ForegroundColor Green
+    }
     Write-Host '==============================================' -ForegroundColor Green
     Info 'Para jugar con un amigo (los dos con TokelaCoop instalado y Steam abierto):' `
          'To play with a friend (both with TokelaCoop installed and Steam running):'

@@ -13,9 +13,8 @@ La partida es la del anfitrión. Cuando guarda, se guarda para los dos, y la pr�
 
 [h2]Instalar[/h2]
 [olist]
-[*]Instala RE_Kenshi (arriba).
 [*]Suscríbete a este mod.
-[*]En el launcher de Kenshi, pestaña Mods, marca TokelaCoop.
+[*]Instala RE_Kenshi (el Workshop no puede hacerlo): en Steam, clic derecho en Kenshi → Administrar → Ver archivos locales. Sube dos carpetas hasta [i]steamapps[/i] y entra en [i]workshop\content\233860\3823660945[/i]. Haz doble clic en [b]«Instalar RE_Kenshi.cmd»[/b]: lo descarga, abre su instalador (pulsa Install) y marca TokelaCoop en la lista de mods.
 [*]Al abrir el juego, arriba a la izquierda pone "TokelaCoop vX.YY". Tiene que poner lo mismo en los dos.
 [/olist]
 ¿Ya lo instalaste con el kit de GitHub? Usa solo uno de los dos: si están los dos marcados, el segundo se queda apagado y avisa.
@@ -40,6 +39,6 @@ Proyecto de fans, sin relación con Lo-Fi Games.
 2-player co-op over Steam. One player (the host) loads their save and the other joins it: you are both in the same world at once, each with your own characters. The game is the host's: when the host saves, it is saved for both, and next time you carry on where you left off. [b]In testing.[/b]
 
 [b]Needs:[/b] Steam Kenshi (tested on 1.0.65), [url=https://github.com/BFrizzleFoShizzle/RE_Kenshi/releases]RE_Kenshi 0.3.5[/url] or newer, and the same TokelaCoop version and the same mods (same order) on both PCs.
-[b]Install:[/b] install RE_Kenshi, subscribe, tick TokelaCoop in the launcher's Mods tab. The top-left corner shows "TokelaCoop vX.YY": it must match on both PCs.
+[b]Install:[/b] subscribe, then double-click "Instalar RE_Kenshi.cmd" in this item's folder (steamapps\workshop\content\233860\3823660945): it installs RE_Kenshi and ticks TokelaCoop in the Mods tab. The top-left corner shows "TokelaCoop vX.YY": it must match on both PCs.
 [b]Play:[/b] press F2 - "Invite a Steam friend", "Open my game to Steam friends" (the friend uses "Join Game" in the Steam friends list) or, next time, "Play again with <friend>".
 Do not combine it with the GitHub kit copy or with another multiplayer mod. Source code (AGPL-3.0), releases and bug reports: [url=https://github.com/dentroytu/TokelaCoop]github.com/dentroytu/TokelaCoop[/url]. Based on nhoral's KenshiCoop.

@@ -2623,7 +2623,11 @@ void Replicator::syncTime(GameWorld* gw, Inbound& in, NetLink& net, u32 ownerId,
     float newSlew = 1.0f;
     if (engage) {
         double d = off * GAIN;
-        if (d >  1.0) d =  1.0;  // cap: 2x sim while far behind
+        // Cap: 2x sim while far behind on the lan profile; 1.5x on internet
+        // (v0.63). At 2x every body the join streams moves at twice its pace,
+        // which the host's drive cannot follow without racing and snapping
+        // (first real session: all squad snaps fell in the catch-up window).
+        if (d > (double)timeSlewMax_) d = (double)timeSlewMax_;
         if (d < -0.75) d = -0.75; // floor: 0.25x sim while ahead (never pause)
         newSlew = (float)(1.0 + d);
     }

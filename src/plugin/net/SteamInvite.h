@@ -64,6 +64,9 @@ void inviteFriend(SteamId id);
 // (Steam's GetFriendPersonaName pointer is transient) and sorted in-Kenshi first.
 // friendState: 0 = offline, 1 = online, 2 = currently playing Kenshi.
 bool        pickerActive();
+// The panel shows the picker right now: the friend list is refreshed (every
+// ~3 s) only then, not for the rest of the session after it was closed.
+void        setPickerShown(bool shown);
 int         friendCount();
 SteamId     friendId(int i);
 const char* friendName(int i);

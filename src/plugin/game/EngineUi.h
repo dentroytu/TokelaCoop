@@ -98,6 +98,10 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                    CoopInviteFriendFn onInviteFriend, CoopInviteBeginFn onOpenToFriends,
                    CoopDisconnectFn onCloseLobby);
 
+// The F2 panel is open on the friend picker (the Steam friend list then needs
+// refreshing; nobody looks at it otherwise).
+bool coopPanelPickerShown();
+
 // Persistent co-op connection-status banner: a single screen-space label fixed 10
 // px in from the top-left corner (a createFloatingLabel MyGUI::Window on the
 // spike-48 screenshot-proven "Info" layer) whose caption shows the live session

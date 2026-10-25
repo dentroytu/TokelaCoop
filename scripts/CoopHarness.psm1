@@ -30,6 +30,16 @@ $script:CoopDiagEnvKeys = @(
     'TOKELACOOP_ROLE_VIA_UI'
     'TOKELACOOP_DISMISS_SYNC'
     'TOKELACOOP_DISMISS_AI'      # harness only (EngineDismiss.cpp): dismiss_ai_off
+    # --- connection profile + drive tuning (v0.63; A/B via run_test -DiagEnvOverride) ---
+    'TOKELACOOP_NET_PROFILE'     # 1 = internet, 0 = lan (the harness default)
+    'TOKELACOOP_TIME_SLEW_MAX'
+    'TOKELACOOP_WALK_CAP_MULT'
+    'TOKELACOOP_WALK_BEHIND_ONLY'
+    'TOKELACOOP_WALK_SRC_VEL'
+    'TOKELACOOP_CATCHUP_K'
+    'TOKELACOOP_SNAP_SECONDS'
+    'TOKELACOOP_INTERP_MAX_DELAY_MS'
+    'TOKELACOOP_INTERP_MAX_EXTRAP_MS'
     'TOKELACOOP_XFER_SYNC'
     'TOKELACOOP_BLOCK_XFER'
     'TOKELACOOP_WORLD_SYNC'

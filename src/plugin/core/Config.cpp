@@ -279,17 +279,44 @@ void loadConfig(Config& c) {
         c.checkUpdates = !(uc == "0" || uc == "false");
     }
 
-    // Protocol 36 movement-smoothness knobs. Defaults are the historical
-    // constants; any positive env value overrides for live A/B tuning.
+    // Connection profile (v0.63). The smoothing below was tuned on one PC
+    // (loopback: no jitter). Over the internet - the first real session,
+    // 2026-10-22: 130-290 ms delay, 40-95 ms jitter - it made the other
+    // player's characters race and jump: the join caught its clock up at 2x
+    // (its bodies streamed at twice their pace), the walk drive sped up bodies
+    // that were AHEAD as well as behind, and the snap gate allowed 0.75 s.
+    // "internet" (every player's default) eases all three; "lan" keeps the old
+    // tuning and stays the harness default, so the existing gates keep
+    // measuring what they always did. A knob's own env var still wins.
     {
+        const bool harness = !c.scenario.empty() || c.testSeconds > 0;
+        std::string np = envOr("TOKELACOOP_NET_PROFILE", "");
+        if (np.empty()) np = fileOr(f, "netProfile", harness ? "lan" : "internet");
+        c.netInternet = !(np == "lan" || np == "0");   // "internet" / "1" otherwise
+        const bool inet = c.netInternet;
+        double f0 = std::atof(envOr("TOKELACOOP_TIME_SLEW_MAX", "0").c_str());
+        c.timeSlewMax = (f0 > 0.0) ? (float)f0 : (inet ? 0.5f : 1.0f);
+        f0 = std::atof(envOr("TOKELACOOP_WALK_CAP_MULT", "0").c_str());
+        c.walkCapMult = (f0 > 0.0) ? (float)f0 : (inet ? 1.8f : 2.5f);
+        std::string g = envOr("TOKELACOOP_WALK_BEHIND_ONLY", "");
+        c.walkBehindOnly = g.empty() ? inet : (g != "0");
+        g = envOr("TOKELACOOP_WALK_SRC_VEL", "");
+        c.walkSrcVel = g.empty() ? inet : (g != "0");
+    }
+
+    // Protocol 36 movement-smoothness knobs. Defaults are the historical
+    // constants (lan) or the internet profile's; any positive env value
+    // overrides for live A/B tuning.
+    {
+        const bool inet = c.netInternet;
         c.sendStamp = envOr("TOKELACOOP_SEND_STAMP", "1") != "0";
         int v;
         v = std::atoi(envOr("TOKELACOOP_INTERP_MIN_DELAY_MS", "0").c_str());
         c.interpMinDelayMs = (v > 0) ? (unsigned int)v : 50u;
         v = std::atoi(envOr("TOKELACOOP_INTERP_MAX_DELAY_MS", "0").c_str());
-        c.interpMaxDelayMs = (v > 0) ? (unsigned int)v : 200u;
+        c.interpMaxDelayMs = (v > 0) ? (unsigned int)v : (inet ? 300u : 200u);
         v = std::atoi(envOr("TOKELACOOP_INTERP_MAX_EXTRAP_MS", "0").c_str());
-        c.interpMaxExtrapMs = (v > 0) ? (unsigned int)v : 250u;
+        c.interpMaxExtrapMs = (v > 0) ? (unsigned int)v : (inet ? 150u : 250u);
         v = std::atoi(envOr("TOKELACOOP_INTERP_MAX_CADENCE_DELAY_MS", "0").c_str());
         c.interpMaxCadenceDelayMs = (v > 0) ? (unsigned int)v : 1200u;
         v = std::atoi(envOr("TOKELACOOP_INTERP_STALE_MS", "0").c_str());
@@ -304,11 +331,11 @@ void loadConfig(Config& c) {
         f = std::atof(envOr("TOKELACOOP_INTERP_CADENCE_K", "0").c_str());
         c.interpCadenceK = (f > 0.0) ? (float)f : 2.0f;
         f = std::atof(envOr("TOKELACOOP_CATCHUP_K", "0").c_str());
-        c.catchupK = (f > 0.0) ? (float)f : 2.0f;
+        c.catchupK = (f > 0.0) ? (float)f : (inet ? 1.0f : 2.0f);
         f = std::atof(envOr("TOKELACOOP_SNAP_DIST", "0").c_str());
         c.snapDist = (f > 0.0) ? (float)f : 8.0f;
         f = std::atof(envOr("TOKELACOOP_SNAP_SECONDS", "0").c_str());
-        c.snapSeconds = (f > 0.0) ? (float)f : 0.75f;
+        c.snapSeconds = (f > 0.0) ? (float)f : (inet ? 1.25f : 0.75f);
         // Combat convergence bands (0 = keep the drive's ReplicatorUtil default).
         c.combatSoftDist    = (float)std::atof(envOr("TOKELACOOP_COMBAT_SOFT_DIST", "0").c_str());
         c.combatSnapDist    = (float)std::atof(envOr("TOKELACOOP_COMBAT_SNAP_DIST", "0").c_str());

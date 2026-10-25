@@ -194,6 +194,14 @@ try {
     Set-Content -LiteralPath (Join-Path $wsOld 'KenshiCoop.dll') -Value 'x'
     Check 'flags an old KenshiCoop Workshop copy too' (@(Find-WorkshopTokelaCoop $k).Count -eq 2)
 
+    Write-Host '== Workshop install (Get-WorkshopKenshiDir, Find-KitTokelaCoop) =='
+    $wk = Get-WorkshopKenshiDir $wsItem
+    Check 'a Workshop item finds the Kenshi of its own Steam library' ($wk -and ((Resolve-Path $wk).Path -eq (Resolve-Path $k).Path))
+    Check 'a folder outside a Workshop library finds no Kenshi' ($null -eq (Get-WorkshopKenshiDir (Join-Path $tmp 'Somewhere\999')))
+    Check 'no item folder, no Kenshi' ($null -eq (Get-WorkshopKenshiDir ''))
+    $kitCopy = Find-KitTokelaCoop $k
+    Check 'sees the kit copy in mods\TokelaCoop' ($kitCopy -and (Test-Path (Join-Path $kitCopy 'TokelaCoop.dll')))
+
     Write-Host '== shipped TokelaCoop.mod =='
     Import-Module (Join-Path $repoRoot 'scripts\ModText.psm1') -Force
     $shipped = Join-Path $repoRoot 'dist\mods\TokelaCoop\TokelaCoop.mod'

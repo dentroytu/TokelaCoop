@@ -56,16 +56,29 @@ struct Config {
                                     // rings on the sender's capture stamp (wire
                                     // v35); "0" = legacy arrival-time indexing
                                     // (receiver-local A/B, no wire change)
+    // Connection profile (v0.63): "internet" (every player's default) or "lan"
+    // (the historical tuning and the harness default). The values in brackets
+    // below are lan / internet where they differ. "netProfile" in
+    // coop_config.json or TOKELACOOP_NET_PROFILE; any knob's own env var wins.
+    bool         netInternet;
+    float        timeSlewMax;       // TOKELACOOP_TIME_SLEW_MAX: the join's clock catch-up runs
+                                    // the game up to 1 + this (1.0 = 2x / 0.5 = 1.5x)
+    float        walkCapMult;       // TOKELACOOP_WALK_CAP_MULT: walk-drive speed cap, x the
+                                    // body's base speed (2.5 / 1.8)
+    bool         walkBehindOnly;    // TOKELACOOP_WALK_BEHIND_ONLY: speed a driven body up only
+                                    // when it trails the newest pose along its travel (0 / 1)
+    bool         walkSrcVel;        // TOKELACOOP_WALK_SRC_VEL: walk at the measured source speed
+                                    // when it outruns the reported one (the peer's game sped up) (0 / 1)
     unsigned int interpMinDelayMs;  // TOKELACOOP_INTERP_MIN_DELAY_MS  (50)
-    unsigned int interpMaxDelayMs;  // TOKELACOOP_INTERP_MAX_DELAY_MS  (200)
-    unsigned int interpMaxExtrapMs; // TOKELACOOP_INTERP_MAX_EXTRAP_MS (250)
+    unsigned int interpMaxDelayMs;  // TOKELACOOP_INTERP_MAX_DELAY_MS  (200 / 300)
+    unsigned int interpMaxExtrapMs; // TOKELACOOP_INTERP_MAX_EXTRAP_MS (250 / 150)
     float        interpCadenceK;    // TOKELACOOP_INTERP_CADENCE_K     (2.0)
     unsigned int interpMaxCadenceDelayMs; // TOKELACOOP_INTERP_MAX_CADENCE_DELAY_MS (1200)
     unsigned int interpStaleMs;     // TOKELACOOP_INTERP_STALE_MS      (2000)
     float        interpSnapDist;    // TOKELACOOP_INTERP_SNAP_DIST     (50 u)
-    float        catchupK;          // TOKELACOOP_CATCHUP_K            (2.0)
+    float        catchupK;          // TOKELACOOP_CATCHUP_K            (2.0 / 1.0)
     float        snapDist;          // TOKELACOOP_SNAP_DIST            (8 u)
-    float        snapSeconds;       // TOKELACOOP_SNAP_SECONDS         (0.75 s)
+    float        snapSeconds;       // TOKELACOOP_SNAP_SECONDS         (0.75 s / 1.25 s)
                                     // velocity-aware hard-snap gate: teleport a
                                     // driven body only when it trails the newest
                                     // sample by more than this much travel time

@@ -94,6 +94,17 @@ foreach ($f in 'TokelaCoop.mod', 'TokelaCoop.dll', 'RE_Kenshi.json', 'coop_confi
     Copy-Item (Join-Path $kitMod $f) (Join-Path $content $f)
 }
 Copy-Item (Join-Path $src 'kit\README.txt') (Join-Path $content 'README.txt')
+Copy-Item (Join-Path $src 'kit\PROVENANCE.json') (Join-Path $content 'PROVENANCE.json')
+# The kit's installer and diagnostics, so a Workshop player can install RE_Kenshi
+# (which the Workshop cannot) with one double-click: "Instalar RE_Kenshi.cmd" runs
+# the installer with -Workshop (kits from v0.63 on; older ones lack it).
+Copy-Item (Join-Path $src 'kit\installer') (Join-Path $content 'installer') -Recurse
+Copy-Item (Join-Path $src 'kit\Recoger diagnostico.cmd') (Join-Path $content 'Recoger diagnostico.cmd')
+if (Select-String -Path (Join-Path $content 'installer\TokelaCoopInstaller.psm1') -Pattern 'Get-WorkshopKenshiDir' -Quiet) {
+    Copy-Item (Join-Path $tool 'Instalar RE_Kenshi.cmd') (Join-Path $content 'Instalar RE_Kenshi.cmd')
+} else {
+    Write-Host "El kit $tag no trae el modo -Workshop del instalador: subo sin 'Instalar RE_Kenshi.cmd'."
+}
 Copy-Item (Join-Path $root 'LICENSE') (Join-Path $content 'LICENSE.txt')
 Copy-Item (Join-Path $tool 'preview.jpg') (Join-Path $content '_TokelaCoop.img')
 $title = (Get-Content (Join-Path $tool 'title.txt') -Raw -Encoding UTF8).Trim()

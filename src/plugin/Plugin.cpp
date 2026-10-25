@@ -1606,6 +1606,7 @@ void coopPanelDrive(bool atTitle) {
     // host's lobby-membership poll both end in coopUiConnect. Then hand the F2
     // panel the invite state + friend list for its "Invite a Steam friend" picker
     // (names point into steaminvite's cache, valid for this call).
+    coop::steaminvite::setPickerShown(coop::engine::coopPanelPickerShown());
     coop::steaminvite::tick();
     static coop::engine::CoopFriendRow s_friends[32];
     int friendN = 0;
@@ -3039,6 +3040,8 @@ void configureReplicator() {
         ic.maxCadenceDelayMs = g_cfg.interpMaxCadenceDelayMs;
         g_repl.setInterpConfig(ic);
         g_repl.setDriveTuning(g_cfg.catchupK, g_cfg.snapDist, g_cfg.snapSeconds);
+        g_repl.setNetTuning(g_cfg.timeSlewMax, g_cfg.walkCapMult,
+                            g_cfg.walkBehindOnly, g_cfg.walkSrcVel);
         g_repl.setCombatTuning(g_cfg.combatSoftDist, g_cfg.combatSnapDist,
                                g_cfg.combatBigSnapDist, g_cfg.combatSlideMax,
                                g_cfg.combatConvergeMs);
@@ -3088,6 +3091,12 @@ void configureReplicator() {
                   g_cfg.sendStamp ? 1 : 0,
                   g_cfg.censusRadius, g_cfg.spawnMintRadius, g_cfg.censusParkDist,
                   g_cfg.censusWalkDist, g_cfg.starveHoldMs);
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
+        _snprintf(b, sizeof(b) - 1,
+                  "TokelaCoop: net profile=%s timeSlewMax=%.2f walkCap=%.2fx behindOnly=%d srcVel=%d",
+                  g_cfg.netInternet ? "internet" : "lan", g_cfg.timeSlewMax, g_cfg.walkCapMult,
+                  g_cfg.walkBehindOnly ? 1 : 0, g_cfg.walkSrcVel ? 1 : 0);
         b[sizeof(b) - 1] = '\0';
         coopLog(b);
     }

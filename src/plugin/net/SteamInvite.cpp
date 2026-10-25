@@ -139,6 +139,7 @@ bool               g_weAreHost    = false;// created the lobby (vs joined a frie
 bool               g_hostFired    = false;// host already connected to the arrived friend
 bool               g_creating     = false;// CreateLobby call in flight
 bool               g_picker       = false;// in-panel friend picker is active
+bool               g_pickerShown  = false;// the panel shows the picker now (setPickerShown)
 bool               g_open         = false;// openToFriends: lobby open for "Join Game"
 unsigned long long g_pendingInvitee = 0;  // friend clicked before the lobby existed
 char               g_status[128]  = {0};
@@ -512,6 +513,7 @@ void inviteFriend(SteamId id) {
 }
 
 bool pickerActive()            { return g_picker; }
+void setPickerShown(bool shown) { g_pickerShown = shown; }
 int  friendCount()             { return g_friendN; }
 SteamId friendId(int i)        { return (i >= 0 && i < g_friendN) ? g_friendRows[i].id : 0; }
 const char* friendName(int i)  { return (i >= 0 && i < g_friendN) ? g_friendRows[i].name : ""; }
@@ -541,7 +543,7 @@ void tick() {
 
     // Refresh the picker's friend list every ~3s while it's open (online / in-game
     // status changes over time). Skip once the host has already connected.
-    if (g_picker && !g_hostFired) {
+    if (g_picker && g_pickerShown && !g_hostFired) {
         unsigned int now = GetTickCount();
         if (g_lastFriendRefresh == 0 || now - g_lastFriendRefresh >= 3000) {
             g_lastFriendRefresh = now;

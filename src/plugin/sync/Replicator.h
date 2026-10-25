@@ -56,6 +56,17 @@ public:
         if (snapDist > 0.0f) snapDist_ = snapDist;
         if (snapSeconds > 0.0f) snapSeconds_ = snapSeconds;
     }
+    // Connection profile (v0.63): the join's clock catch-up cap (game speed up
+    // to 1 + timeSlewMax), the walk-drive speed cap (x base speed), whether
+    // only a body trailing the newest pose gets the catch-up speed, and
+    // whether a body walks at the measured source speed when the peer's game
+    // runs faster than the speed it reports (its own clock catch-up).
+    void setNetTuning(float timeSlewMax, float walkCapMult, bool behindOnly, bool srcVel) {
+        if (timeSlewMax > 0.0f) timeSlewMax_ = timeSlewMax;
+        if (walkCapMult > 1.0f) walkCapMult_ = walkCapMult;
+        walkBehindOnly_ = behindOnly;
+        walkSrcVel_     = srcVel;
+    }
     // Combat-drive convergence bands (2026-07-16 smoothness pass). 0 keeps the
     // ReplicatorUtil constant default; > 0 overrides for a sweep without a rebuild.
     void setCombatTuning(float softDist, float snapDist, float bigSnapDist,
@@ -1412,6 +1423,11 @@ private:
                                         // by more than this much TRAVEL TIME (the
                                         // fixed distance gate false-fired on
                                         // sprinters and any game speed > 2x)
+    // Connection profile (v0.63, Config.h netInternet): see setNetTuning.
+    float                 timeSlewMax_;    // join clock catch-up cap above 1x
+    float                 walkCapMult_;    // walk-drive speed cap x base speed
+    bool                  walkBehindOnly_; // speed up only a body that trails
+    bool                  walkSrcVel_;     // walk at the measured source speed
     float                 combatSoftDist_;    // combat converge soft band (u)
     float                 combatSnapDist_;    // combat churn ceiling / slide trigger (u)
     float                 combatBigSnapDist_; // combat true-leave instant-teleport dist (u)
