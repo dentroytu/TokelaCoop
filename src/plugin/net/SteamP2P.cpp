@@ -391,5 +391,7 @@ void shutdown() {
     if (g_pingPeer != 0 && g_pingPeer != g_peer) g_close(g_iface, g_pingPeer);
 }
 
+void markDown() { g_ready = false; }
+
 } // namespace steamp2p
 } // namespace coop

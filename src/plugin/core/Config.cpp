@@ -303,6 +303,9 @@ void loadConfig(Config& c) {
         g = envOr("TOKELACOOP_WALK_SRC_VEL", "");
         c.walkSrcVel = g.empty() ? inet : (g != "0");
     }
+    // Read here, where 'f' is still the file map (the smoothness block below
+    // shadows it with a double): see the presence-authority block.
+    const std::string cellAuthFile = fileOr(f, "cellAuth", "0");
 
     // Protocol 36 movement-smoothness knobs. Defaults are the historical
     // constants (lan) or the internet profile's; any positive env value
@@ -421,7 +424,20 @@ void loadConfig(Config& c) {
         // (scripts/CoopHarness.psm1) pins TOKELACOOP_CELL_AUTH=0 for every
         // scenario that does not ask for it, which is what keeps the tier a
         // fail-open proof rather than a co-test of this flag.
-        c.cellAuth = envOr("TOKELACOOP_CELL_AUTH", "1") != "0";
+        //
+        // DEFAULT OFF again from v0.63. In the first real session (2026-10-22)
+        // a fight straddled a cell boundary - the "accepted miss" of the
+        // same-cell collapse (claimsCoLocated) - and the friend authored the
+        // fight's cell for 4 s: the host minted 18 copies it never cleaned up,
+        // split NPCs into one-man squads with no AI, and those stood over the
+        // downed players re-knocking them ("stuck when NPCs kill us"). Every
+        // regression gate runs with it off, so off is the tested behaviour.
+        // "cellAuth": true in coop_config.json (or TOKELACOOP_CELL_AUTH=1)
+        // brings it back for players who mostly split up.
+        {
+            std::string ca = envOr("TOKELACOOP_CELL_AUTH", cellAuthFile.c_str());
+            c.cellAuth = (ca == "1" || ca == "true");
+        }
         // Co-location collapse: hand every claimed cell to the host while the
         // squads are on top of each other. Only consulted when cellAuth is on -
         // with authority off the host already owns everything. "0" restores the

@@ -3455,6 +3455,45 @@ void __cdecl crtExit_hook(int code) {
     g_crtExit_orig(code);
 }
 
+// Kenshi calls SteamAPI_Shutdown at the end of its run function, BEFORE the CRT
+// exit() hooked above, and steam_api64 then FreeLibrary's steamclient64.dll. A
+// Steam session's net thread was still polling the P2P tunnel (hookWait, every
+// 5 ms) and faulted executing the unloaded code: the first real session ended
+// in an EXECUTE fault at an unmapped address (host log, 2026-10-22 02:28:12).
+// UDP sessions never call Steam from the net thread, which is why the earlier
+// exit fixes, tested over UDP, never met it. So the network stops - and says
+// goodbye - while Steam is still alive, and our Steam layers shut down first.
+typedef void (*SteamShutdownFn)();
+SteamShutdownFn g_steamShutdown_orig = 0;
+
+void steamShutdown_hook() {
+    bool threadGone = true;
+    if (g_net.isRunning()) {
+        threadGone = g_net.stopForExit(1500);
+        coopLog(threadGone ? "[exit] network stopped before SteamAPI_Shutdown"
+                           : "[exit] network still stopping after 1.5 s; Steam left loaded");
+    }
+    coop::steaminvite::reset();   // leave the lobby while Steam can still hear it
+    coop::steamp2p::shutdown();
+    coop::steamp2p::markDown();
+    // A net thread that did not stop may still be inside a Steam call: unloading
+    // Steam under it is the crash this hook exists for. The process is ending,
+    // so skipping the unload costs nothing.
+    if (threadGone && g_steamShutdown_orig) g_steamShutdown_orig();
+}
+
+void installSteamShutdownHook() {
+    HMODULE sa = GetModuleHandleA("steam_api64.dll");
+    void* target = sa ? (void*)GetProcAddress(sa, "SteamAPI_Shutdown") : 0;
+    if (!target ||
+        KenshiLib::AddHook(target, (void*)&steamShutdown_hook,
+                           (void**)&g_steamShutdown_orig) != KenshiLib::SUCCESS) {
+        coopErr("TokelaCoop: could not hook SteamAPI_Shutdown (quitting during a Steam session may crash)");
+        return;
+    }
+    coopLog("TokelaCoop: SteamAPI_Shutdown hook armed (the network stops before Steam unloads)");
+}
+
 void installExitHook() {
     HMODULE crt = GetModuleHandleA("MSVCR100.dll");
     void* target = crt ? (void*)GetProcAddress(crt, "exit") : 0;
@@ -3532,6 +3571,7 @@ __declspec(dllexport) void startPlugin() {
     installTitleHook();
 
     installExitHook();
+    installSteamShutdownHook();
 
     if (g_cfg.testSeconds > 0) {
         char b[96];

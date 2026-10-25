@@ -61,6 +61,9 @@ void removeEnetHooks();
 
 // Close the P2P sessions (peer + ping peer).
 void shutdown();
+// Steam is about to unload (SteamAPI_Shutdown): every tunnel hook and call
+// returns early from now on instead of calling into it.
+void markDown();
 
 } // namespace steamp2p
 } // namespace coop
